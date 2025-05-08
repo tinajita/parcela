@@ -29,7 +29,7 @@
             text-align: center;
             margin-bottom: 10px;
         }
-        .control-container label, .control-container input, .control-container button, .control-container select { /* Añadido 'select' */
+        .control-container label, .control-container input, .control-container button, .control-container select {
             display: inline-block;
             margin: 5px;
             padding: 10px 20px;
@@ -220,7 +220,7 @@
                 });
         }
 
-         // Función para cargar el GeoTIFF COG
+         // Función para cargar el GeoTIFF COG (ACTUALIZADA para intentar solucionar parseGeoRaster no definido)
          function loadGeoTIFFLayer(url, layerName, opacity = 0.5, style = {}) {
              loadingStatusDiv.textContent = `Cargando ${layerName}...`;
              console.log(`Iniciando carga de ${layerName} desde: ${url}`);
@@ -241,14 +241,27 @@
                  })
                  .then(arrayBuffer => {
                      console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
-                      // parseGeoRaster es proporcionado por la librería georaster
-                     if (typeof parseGeoRaster === 'undefined') {
-                          const error = new Error("Librería GeoRaster no cargada correctamente. parseGeoRaster no definido.");
-                           console.error(`Error parseando GeoTIFF de ${layerName}: ${error.message}`);
-                            loadingStatusDiv.textContent = `Error cargando ${layerName}: Librería GeoRaster.`;
-                           return Promise.reject(error); // Rechazar la promesa para que Promise.all falle
+                      // *** MODIFICACIÓN AQUÍ: Intentar acceder a parseGeoRaster de forma segura ***
+                     let parseFn = typeof parseGeoRaster !== 'undefined' ? parseGeoRaster : undefined;
+
+                     // Si parseGeoRaster no está definido globalmente, verificar si está bajo un objeto global como 'GeoRaster'
+                     if (typeof parseFn === 'undefined' && typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.parseGeoRaster === 'function') {
+                          parseFn = window.GeoRaster.parseGeoRaster;
+                          console.log("parseGeoRaster encontrado bajo window.GeoRaster.");
+                     } else if (typeof parseFn === 'undefined') {
+                          // Si aún no se encuentra, loggear lo que hay en window.GeoRaster para depurar
+                           console.error("parseGeoRaster no definido globalmente ni bajo window.GeoRaster.");
+                           if (typeof window.GeoRaster !== 'undefined') {
+                                console.log("Contenido de window.GeoRaster:", window.GeoRaster);
+                           }
+                           const error = new Error("Librería GeoRaster no cargada correctamente. parseGeoRaster no definido.");
+                           loadingStatusDiv.textContent = `Error cargando ${layerName}: Librería GeoRaster.`;
+                           return Promise.reject(error); // Rechazar la promesa
                      }
-                     return parseGeoRaster(arrayBuffer); // Esto devuelve una Promise
+
+                     // Usar la función parseFn encontrada
+                     return parseFn(arrayBuffer); // Esto devuelve una Promise
+
                  })
                  .then(georaster => {
                      console.log("GeoRaster de elevación parseado con éxito:", georaster);
@@ -321,7 +334,7 @@
                      if (result.error) {
                           allKeyDataLoadedSuccessfully = false;
                           // El error ya fue loggeado en la función de carga.
-                          // Podemos mostrar un mensaje de error general al final si allKeyDataLoadedSuccessfully es false.
+                          // Podemos mostrar un mensaje de error general al final si allKeyDataLoadedSuccessfully es false
                      } else {
                          // Si la carga fue exitosa, procesar y añadir la capa al mapa/control
                          if (result.name === 'Mis Parcelas') {
@@ -377,15 +390,22 @@
                                else { overlayLayers["Curvas de Nivel"] = result.layer; } // Añadir capa al control
                          }
 
-                          // Añadir la capa Leaflet al mapa si se creó correctamente
-                         if (result.layer) {
-                             result.layer.addTo(map);
+                          // Añadir la capa Leaflet al mapa si se creó correctamente (excepto Parcelas, que se añade después de poblar el selector)
+                         if (result.layer && result.name !== 'Mis Parcelas') {
+                            result.layer.addTo(map);
                          }
                      }
                  });
 
                  console.log(`Total features de exclusión recopiladas: ${window.exclusionFeatures.length}`);
                  console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures);
+
+                 // Añadir la capa de Parcelas al mapa y al control de capas una vez que el selector esté poblado
+                 if (parcelasLayer) {
+                     parcelasLayer.addTo(map);
+                      // overlayLayers["Mis Parcelas"] = parcelasLayer; // Ya se añadió en loadGeoJSONLayer si tuvo éxito
+                 } else { allKeyDataLoadedSuccessfully = false; console.error("La capa de Parcelas no se pudo cargar."); }
+
 
                 // Actualizar el control de capas final
                 updateLayersControl();
@@ -599,7 +619,7 @@
                               } catch (e) { console.warn(`Error al verificar intersección para feature de exclusión. Se omitirá.`, exclusionFeature, e); }
                          }
                       });
-                 } else { console.log("No se cargaron features de exclusión globalmente."); }
+                 } else { console.log("No hay zonas de exclusión cargadas globalmente."); }
                  console.log(`Features de exclusión que intersectan con la parcela seleccionada: ${intersectingExclusionFeatures.length}`);
 
                 // --- Calcular el área limpia (Parcela - Unión de ExclusionFeatures simplificadas que intersectan) ---
@@ -618,9 +638,9 @@
                          // turf.union puede manejar múltiples polígonos/multipolígonos
                          const unionOfExclusionsFeature = turf.union(...intersectingExclusionFeatures);
 
-                         if (unionOfExclusionsFeature && unionOfExclusionsFeature.geometry) {
+                         if (unionOfExclusionsFeature && unionOfExclusionFeature.geometry) {
                              // turf.difference(feature1, feature2) feature1 - feature2
-                             const cleanedAreaFeature = turf.difference(parcelFeature, unionOfExclusionsFeature);
+                             const cleanedAreaFeature = turf.difference(parcelFeature, unionOfExclusionFeature);
 
                              if (cleanedAreaFeature && cleanedAreaFeature.geometry) {
                                  geometryForCalculations = cleanedAreaFeature.geometry; // Usar la geometría del área limpia
