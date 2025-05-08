@@ -224,6 +224,7 @@
              console.log(`Iniciando carga de ${layerName} desde: ${url}`);
 
               // Verificar que Leaflet esté cargado antes de intentar usar GeoRasterLayer
+              // NOTA: Esta verificación en tiempo de ejecución es un respaldo. El orden correcto de los SCRIPT tags es clave.
               if (typeof L === 'undefined' || typeof L.GridLayer === 'undefined') {
                   const error = new Error("Leaflet o L.GridLayer no está cargado o inicializado correctamente.");
                   console.error(`Error cargando ${layerName}: ${error.message}`);
@@ -565,7 +566,7 @@
 
 
         // El selector 'avoid-select' en el HTML original no tenía funcionalidad asociada.
-        // Si necesitas implementar la selección de zonas a evitar desde un select, necesitarás
+        // Si necesitas implementar la selección de zonas a evitar desde un select, necesitarías
         // poblarlo con opciones (ej. IDs de construcciones/viales) y manejar su selección.
         // La lógica de exclusión de zonas a evitar en la generación de pasadas ya usa la variable
         // global `window.exclusionFeatures` poblada al inicio. Puedes usar esa variable.
@@ -828,7 +829,7 @@
 
                              safetyCounter++;
                              if (safetyCounter >= maxSweeps) {
-                                console.warn(`Se alcanzó el límite máximo de ${maxSweeps} líneas de barrido. El área limpia podría no estar completamente cubierta.`);
+                                console.warn(`Se alcanzó el límite máximo de ${maxSweeps} líneas de barrido. El área limpia podría no estar completamente cubierta.");
                              }
 
                        } // Fin bucle while
