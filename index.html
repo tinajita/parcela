@@ -9,7 +9,7 @@
         crossorigin="anonymous"/>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
-    <script src="https://unpkg.com/georaster@1.7.1/dist/bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/georaster@1.7.1/dist/bundle.js"></script>
     <script src="https://unpkg.com/georaster-layer-for-leaflet@3.9.1/dist/georaster-layer-for-leaflet.min.js"></script>
 
     <style>
@@ -242,21 +242,22 @@
                  .then(arrayBuffer => {
                      console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
                       // *** MODIFICACIÓN AQUÍ: Intentar acceder a parseGeoRaster de forma segura ***
+                      // Verificar si parseGeoRaster está directamente en el ámbito global
                      let parseFn = typeof parseGeoRaster !== 'undefined' ? parseGeoRaster : undefined;
 
-                     // Si parseGeoRaster no está definido globalmente, verificar si está bajo un objeto global como 'GeoRaster'
+                     // Si no está globalmente, verificar si está bajo window.GeoRaster
                      if (typeof parseFn === 'undefined' && typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.parseGeoRaster === 'function') {
                           parseFn = window.GeoRaster.parseGeoRaster;
                           console.log("parseGeoRaster encontrado bajo window.GeoRaster.");
                      } else if (typeof parseFn === 'undefined') {
-                          // Si aún no se encuentra, loggear lo que hay en window.GeoRaster para depurar
+                          // Si aún no se encuentra, loggear para depurar y rechazar la promesa
                            console.error("parseGeoRaster no definido globalmente ni bajo window.GeoRaster.");
                            if (typeof window.GeoRaster !== 'undefined') {
                                 console.log("Contenido de window.GeoRaster:", window.GeoRaster);
                            }
                            const error = new Error("Librería GeoRaster no cargada correctamente. parseGeoRaster no definido.");
                            loadingStatusDiv.textContent = `Error cargando ${layerName}: Librería GeoRaster.`;
-                           return Promise.reject(error); // Rechazar la promesa
+                           return Promise.reject(error); // Rechazar la promesa para que Promise.all falle
                      }
 
                      // Usar la función parseFn encontrada
@@ -429,7 +430,7 @@
                       console.error("La carga automática de datos finalizó, pero faltan datos clave. El botón de generar pasadas está deshabilitado.");
                       // Un alert general al final si hubo algún error de carga clave
                       if (!parcelasGeoJSON || !elevationGeoRaster || !contourLinesGeoJSON) {
-                           alert("No se pudieron cargar todos los datos necesarios (Parcelas, Elevación o Curvas de Nivel). Revisa la consola para detalles.");
+                           // alert("No se pudieron cargar todos los datos necesarios (Parcelas, Elevación o Curvas de Nivel). Revisa la consola para detalles."); // Ya se alerta dentro de las funciones de carga si hay error HTTP
                       }
                  }
 
@@ -640,7 +641,7 @@
 
                          if (unionOfExclusionsFeature && unionOfExclusionFeature.geometry) {
                              // turf.difference(feature1, feature2) feature1 - feature2
-                             const cleanedAreaFeature = turf.difference(parcelFeature, unionOfExclusionFeature);
+                             const cleanedAreaFeature = turf.difference(parcelFeature, unionOfExclusionsFeature);
 
                              if (cleanedAreaFeature && cleanedAreaFeature.geometry) {
                                  geometryForCalculations = cleanedAreaFeature.geometry; // Usar la geometría del área limpia
@@ -667,7 +668,7 @@
                  // VALIDACIONES BÁSICAS del área para pasar
                  if (!geometryForCalculations || !(geometryForCalculations.type === 'Polygon' || geometryForCalculations.type === 'MultiPolygon')) {
                      console.error("La geometría final para cálculos no es un Polígono/MultiPolígono válido.");
-                     alert("Error: La geometría resultante para generar pasadas no es válida.");
+                     alert("Error: La geometría resultante para generar pasadas es inválida.");
                      return;
                  }
                  try { if (turf.area(turf.feature(geometryForCalculations)) === 0) { alert("El área para generar pasadas es cero."); return; } } catch(e) { console.error("Error área:", e); return; }
@@ -739,7 +740,6 @@
                        let safetyCounter = 0;
                        const maxSweeps = Math.ceil(totalSweepExtent / density) + 5; // Límite de seguridad
 
-                       // Mover la línea de barrido por el ancho de trabajo e intersectar
                        while(safetyCounter < maxSweeps) {
 
                            try {
