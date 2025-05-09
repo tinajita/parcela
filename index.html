@@ -115,7 +115,14 @@
                 const lowerKey = key.toLowerCase();
                 if (lowerKey.includes('georaster') || lowerKey.includes('geotiff') || (typeof window[key] === 'function' && lowerKey.includes('parse'))) {
                      // Limitar la profundidad para evitar logs excesivos de objetos complejos
-                     console.log(`window['${key}']:`, typeof window[key] === 'function' ? window[key].toString().substring(0, 100) + '...' : window[key]);
+                     // console.log(`window['${key}']:`, typeof window[key] === 'function' ? window[key].toString().substring(0, 100) + '...' : window[key]);
+                     // Mostrar el objeto completo para mejor depuración, pero con cuidado
+                     try {
+                         console.log(`window['${key}']:`, window[key]);
+                     } catch(e) {
+                         console.log(`window['${key}']: Error al serializar`, e);
+                     }
+
                 }
             // }
         }
@@ -812,7 +819,7 @@
                       } catch(e) { console.error("Error calculando área:", e); return; }
 
 
-                    // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A CI Ó N   Y   C U R V A S *** ---
+                    // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A C I Ó N   Y   C U R V A S *** ---
                     // Esta es la parte que DEBES implementar basándote en tus datos cargados.
                     // El algoritmo para generar pasadas que cambian de dirección según la pendiente
                     // y siguen las curvas de nivel es complejo y requiere un diseño específico.
