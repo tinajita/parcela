@@ -257,7 +257,7 @@
 
 
                   // Verificar si proj4js está cargado y la proyección está definida antes de intentar usarlo con georaster
-                 if (typeof proj4 === 'undefined' || !proj4.defs("EPSG:25830")) {
+                 if (typeof proj4 !== 'undefined' || !proj4.defs("EPSG:25830")) {
                       const error = new Error("Proj4js o la definición EPSG:25830 no está disponible. No se cargará el GeoTIFF.");
                       console.error(`Error cargando ${layerName}: ${error.message}`);
                       loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
@@ -273,7 +273,7 @@
                      })
                      .then(arrayBuffer => {
                          console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
-                          // *** Intentar acceder a parseGeoraster de forma segura ***
+                          // *** Intentar acceder a parseGeoRaster de forma segura ***
                           let parseFn = undefined;
 
                           // Esperamos que parseGeoraster esté globalmente disponible con el paquete browser.bundle
@@ -593,7 +593,10 @@
                            if (elevationGeoRaster === null) console.error("Error: No se pudieron cargar los datos de Elevación (MDT)."); // Solo log si ya se intentó cargar
                            if (contourLinesGeoJSON === null || !contourLinesGeoJSON.features) console.error("Error: No se pudieron cargar los datos de Curvas de Nivel."); // Solo log si ya se intentó cargar
 
-                          alert("Error: No se pudieron cargar todos los datos necesarios (Parcelas, Elevación o Curvas de Nivel). Revisa la consola para detalles. No se pueden generar pasadas.");
+                           // Mostramos un alert solo si hay algún error en la carga de datos clave
+                           if (!parcelasGeoJSON || elevationGeoRaster === null || contourLinesGeoJSON === null || !contourLinesGeoJSON.features) {
+                                alert("Error: No se pudieron cargar todos los datos necesarios (Parcelas, Elevación o Curvas de Nivel). Revisa la consola para detalles. No se pueden generar pasadas.");
+                           }
                      }
 
 
@@ -1546,7 +1549,9 @@
                    // Esta lógica es significativamente más compleja que el barrido recto actual.
 
 
-                loadingStatusDiv.textContent = `Pasadas generadas: ${generatedPassesFeatures.length} segmentos.`; // Count the generated segments before rotation
+                // Count the generated segments AFTER rotation and filtering out invalid ones
+                const finalPassSegmentsCount = generatedPassesLayer.getLayers().length;
+                loadingStatusDiv.textContent = `Pasadas generadas: ${finalPassSegmentsCount} segmentos.`;
                 console.log("--- Fin Generación de Pasadas ---");
 
 
