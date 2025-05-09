@@ -289,7 +289,7 @@
                                                 console.warn("No se pudo crear buffer para LineString de Elemento Interno. El resultado de turf.buffer fue nulo/undefined. No se usará para recorte:", feature);
                                             }
                                        } catch (e) {
-                                            console.error("Error al crear buffer para LineString:", feature, e);
+                                            console.error("Error al crear buffer para LineString:", e);
                                             console.warn("Error al crear buffer para LineString de Elemento Interno. No se usará para recorte.");
                                        }
 
@@ -309,16 +309,16 @@
                        loadingStatusDiv.textContent += ' Advertencia: Datos de Viales/Arroyos inválidos.';
                  }
 
-                // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
+                // --- Código para cargar la capa de curvas de nivel (GeoJSON) - ESTILO MODIFICADO ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
                   if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
                        curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
                            style: function(feature) {
-                                // Estilo para las curvas de nivel: color marrón, grosor y opacidad
+                                // Estilo discreto para las curvas de nivel: color gris claro, grosor muy fino, opacidad baja
                                 return {
-                                    color: '#a0522d', // Color marrón (Puedes ajustar este color)
-                                    weight: 1.5,      // Grosor de línea
-                                    opacity: 0.8      // Opacidad
+                                    color: '#cccccc', // Color gris muy claro (Puedes ajustar este color)
+                                    weight: 0.7,      // Grosor de línea (muy fino)
+                                    opacity: 0.6      // Opacidad baja
                                 };
                            },
                            onEachFeature: function(feature, layer) {
@@ -356,7 +356,7 @@
 
                        // Añadir la nueva capa al control de capas
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
-                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
+                       console.log(`Curvas de Nivel cargadas en Leaflet con estilo discreto. Número de features: ${curvasNivelGeojsonData.features.length}.`);
 
                   } else {
                       console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
