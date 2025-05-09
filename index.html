@@ -8,25 +8,13 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
 
-    <!-- !!! IMPORTANTE: ORDEN DE CARGA DE SCRIPTS - CADA UNO EN SU LINEA !!! -->
-    <!-- 1. Leaflet (CSS ya arriba) -->
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- 2. Librerías GEO que dependen de Leaflet y entre sí -->
-    <!-- proj4js debe cargarse antes de georaster si georaster lo necesita para proyecciones -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
-    <!-- georaster debe cargarse ANTES que georaster-layer-for-leaflet -->
-    <!-- CORREGIDO: Intentando con el .min.js de GeoRaster v1.6.0 en unpkg -->
     <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.min.js"></script>
-    <!-- georaster-layer-for-leaflet debe cargarse DESPUÉS de Leaflet y georaster -->
-    <!-- CORREGIDO: Volviendo a la versión 3.8.0 según feedback del usuario -->
     <script src="https://unpkg.com/georaster-layer-for-leaflet@3.8.0/dist/georaster-layer-for-leaflet.min.js"></script>
 
-    <!-- 3. Librerías generales como Turf.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <!-- !!! FIN ORDEN DE CARGA DE SCRIPTS !!! -->
-
-
     <style>
         #map {
             height: 500px;
@@ -75,19 +63,15 @@
 <body>
 
     <div class="control-container">
-        <!-- Añadidos selectores de parcela y zona a evitar -->
         <label for="parcel-select">Seleccionar Parcela:</label>
         <select id="parcel-select">
            <option value="">-- Seleccionar --</option>
-           <!-- Opciones cargadas por JavaScript -->
-        </select>
+           </select>
 
-         <!-- El selector de zona a evitar no estaba funcional en el original, lo mantengo como placeholder si lo necesitas -->
-        <label for="avoid-select">Seleccionar Zona a Evitar:</label>
+         <label for="avoid-select">Seleccionar Zona a Evitar:</label>
         <select id="avoid-select">
             <option value="">-- Seleccionar --</option>
-            <!-- Opciones cargadas por JavaScript si implementas esa lógica -->
-        </select>
+            </select>
 
 
         <label for="workingWidth">Ancho de Trabajo (m):</label>
@@ -101,945 +85,969 @@
         <div id="map"></div>
     </div>
 
-    <!-- Tu script principal DEBE ir DESPUÉS de cargar TODAS las librerías de las que depende -->
-    <!-- Añadido atributo 'defer' para asegurar ejecución después del DOM y librerías -->
     <script defer>
-        // Define updateLayersControl function here, OUTSIDE of DOMContentLoaded listener.
-        // This helps ensure it is defined in the correct scope when called from the Promise.all.
-        let layersControl = null; // Define a nivel de script para que updateLayersControl pueda acceder
-        const baseLayers = {}; // Definir aquí para que updateLayersControl y el Promise.all puedan acceder
-        const overlayLayers = {}; // Definir aquí para que updateLayersControl y el Promise.all puedan acceder
+        // Define variables y funciones clave en un ámbito superior para evitar ReferenceErrors
+        let map; // Se inicializará en DOMContentLoaded
+        let layersControl = null;
+        const baseLayers = {};
+        const overlayLayers = {};
 
+        // Función para actualizar el control de capas
         function updateLayersControl() {
-             // Inicializa el control de capas si aún no existe
-             if (!layersControl) {
+             // Inicializa el control si no existe o lo actualiza
+             if (!layersControl && map) { // Inicializar solo si el mapa está listo
                   layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
                   console.log("Layers control inicializado.");
-             } else {
-                 // Si ya existe, actualiza las capas en el control existente
+             } else if (layersControl && map) { // Actualizar si el control ya existe y el mapa está listo
                  map.removeControl(layersControl);
                  layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
                  console.log("Layers control actualizado.");
+             } else {
+                 console.warn("Mapa no definido o control de capas no inicializado. No se puede actualizar el control de capas.");
              }
         }
 
-
-        // NOTA: Estos console.log ahora se ejecutarán cuando el script principal se ejecute,
-        // que es después de que el DOM esté cargado y las librerías (si se cargaron sin errores)
-        // deberían estar disponibles. El mensaje "inmediatamente después del script tag"
-        // puede que ya no aplique textualmente a este punto, sino que signifique
-        // "inmediatamente al inicio de la ejecución de este script".
-        console.log("Estado de 'turf' al inicio del script principal:", typeof turf);
-        if (typeof turf === 'undefined') {
-             console.error("VERIFICACIÓN: 'turf' es undefined. El script de Turf.js NO se cargó o ejecutó como se esperaba.");
-        } else {
-             console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
+        // --- Debugging: Inspect global window object after library scripts load ---
+        console.log("Contenido de window después de cargar librerías:");
+        for (let key in window) {
+            // Añadir una comprobación hasOwnProperty para evitar propiedades heredadas si es necesario
+            // if (window.hasOwnProperty(key)) {
+                const lowerKey = key.toLowerCase();
+                if (lowerKey.includes('georaster') || lowerKey.includes('geotiff') || (typeof window[key] === 'function' && lowerKey.includes('parse'))) {
+                     // Limitar la profundidad para evitar logs excesivos de objetos complejos
+                     console.log(`window['${key}']:`, typeof window[key] === 'function' ? window[key].toString().substring(0, 100) + '...' : window[key]);
+                }
+            // }
         }
+        console.log("--- Fin Contenido de window ---");
 
-        // --- Definir la proyección ETRS89 / UTM zone 30N (EPSG:25830) ---
-         // Esto es necesario para que proj4js y las librerías que lo usan (como georaster-layer-for-leaflet)
-         // entiendan el sistema de coordenadas del MDT GeoTIFF.
-         if (typeof proj4 !== 'undefined') {
-             try {
-                 // +towgs84=0,0,0,0,0,0,0 es la transformación estándar de ETRS89 a WGS84, asumiendo que son equivalentes en la práctica.
-                 proj4.defs("EPSG:25830", "+proj=utm +zone=30 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
-                 console.log("Proyección EPSG:25830 (ETRS89 / UTM Huso 30N) definida en proj4js.");
-             } catch(e) {
-                  console.error("Error definiendo proyección EPSG:25830 en proj4js:", e);
+
+        // --- El resto del script se ejecuta después de que el DOM esté listo y las librerías con 'defer' cargadas ---
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("El DOM está cargado. Iniciando script principal.");
+            console.log("Estado de 'turf' al inicio del script principal:", typeof turf);
+            if (typeof turf === 'undefined') {
+                 console.error("VERIFICACIÓN: 'turf' es undefined. El script de Turf.js NO se cargó o ejecutó como se esperaba.");
+            } else {
+                 console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
+            }
+
+            // --- Definir la proyección ETRS89 / UTM zone 30N (EPSG:25830) ---
+             // Esto es necesario para que proj4js y las librerías que lo usan (como georaster-layer-for-leaflet)
+             // entiendan el sistema de coordenadas del MDT GeoTIFF.
+             if (typeof proj4 !== 'undefined') {
+                 try {
+                     // +towgs84=0,0,0,0,0,0,0 es la transformación estándar de ETRS89 a WGS84, asumiendo que son equivalentes en la práctica.
+                     proj4.defs("EPSG:25830", "+proj=utm +zone=30 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+                     console.log("Proyección EPSG:25830 (ETRS89 / UTM Huso 30N) definida en proj4js.");
+                 } catch(e) {
+                      console.error("Error definiendo proyección EPSG:25830 en proj4js:", e);
+                 }
+             } else {
+                 console.error("Proj4js no está cargado. La capa de elevación podría no cargarse correctamente.");
              }
-         } else {
-             console.error("Proj4js no está cargado. La capa de elevación podría no cargarse correctamente.");
-         }
 
 
-        // Vista inicial en Andalucía (ajustada para Ronda)
-        const map = L.map('map').setView([36.7462, -5.1612], 14); // Vista ajustada
+            // Vista inicial en Andalucía (ajustada para Ronda)
+            map = L.map('map').setView([36.7462, -5.1612], 14); // Vista ajustada
 
-        // --- Variables ---
-        let selectedLayer = null; // Variable para almacenar la capa (parcela) que está seleccionada
-        let originalStyle = {}; // Variable para guardar el estilo original de cada capa de parcela
-        let parcelasLayer = null; // Capa para parcelas (seleccionable)
-        let parcelasGeoJSON = null; // Almacenar datos GeoJSON de parcelas
-        let construccionesLayer = null; // Capa para construcciones (exclusión)
-        let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
-        window.exclusionFeatures = []; // Variable global para almacenar las geometrías de exclusión (Polygon/MultiPolygon)
-        let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
+            // --- Variables ---
+            let selectedLayer = null; // Variable para almacenar la capa (parcela) que está seleccionada
+            let originalStyle = {}; // Variable para guardar el estilo original de cada capa de parcela
+            let parcelasLayer = null; // Capa para parcelas (seleccionable)
+            let parcelasGeoJSON = null; // Almacenar datos GeoJSON de parcelas
+            let construccionesLayer = null; // Capa para construcciones (exclusión)
+            let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
+            window.exclusionFeatures = []; // Variable global para almacenar las geometrías de exclusión (Polygon/MultiPolygon)
+            let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
-        // --- Variables para los nuevos datos de elevación y curvas de nivel ---
-        let elevationGeoRaster = null; // Para almacenar el objeto GeoRaster del MDT cargado
-        let contourLinesGeoJSON = null; // Para almacenar los datos GeoJSON de las curvas de nivel cargadas
-
-
-        // --- Elementos de la interfaz ---
-        const generarPasadasBtn = document.getElementById('generarPasadasBtn');
-        const workingWidthInput = document.getElementById('workingWidth');
-        const loadingStatusDiv = document.getElementById('loading-status'); // Referencia al indicador de carga
-
-        // --- Capas base ---
-        // Capa Minimalista (Se mantiene)
-        baseLayers["Fondo Claro Minimalista"] = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
-            maxZoom: 19
-        });
-
-        // Capa Satélite Esri (Se mantiene para el híbrido, pero se quita del selector de capas base)
-         const satelliteLayer = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-              attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DigitalGlobe, GeoEye, Earthstar Geographics, CNES/Airbus DS, GeoEye, Earthstar Geographics, CNES/Airbus DS, GeoEye, USDA FSA, USGS, AeroGRID, IGN, IGP, swisstopo, and the GIS User Community',
-              maxZoom: 18
-         });
-
-        // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-             attribution: 'Esri, Garmin, FAO, NOAA, USGS',
-             maxZoom: 17,
-             transparent: true
-           });
-
-        // Capa Híbrida (Satélite + Etiquetas) (Se mantiene)
-         baseLayers["Híbrido Satélite+Etiquetas (Esri)"] = L.layerGroup([satelliteLayer, esriOverlayLabels]);
+            // --- Variables para los nuevos datos de elevación y curvas de nivel ---
+            let elevationGeoRaster = null; // Para almacenar el objeto GeoRaster del MDT cargado
+            let contourLinesGeoJSON = null; // Para almacenar los datos GeoJSON de las curvas de nivel cargadas
 
 
-        // --- Capa de superposición WMS de la Dirección General del Catastro ---
-        const catastroWmsUrl = 'https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx';
-        overlayLayers["Cartografía Catastral (WMS)"] = L.tileLayer.wms(catastroWmsUrl, {
-            layers: 'Catastro',
-            styles: '',
-            format: 'image/png',
-            transparent: true,
-            attribution: 'Cartografía &copy; Dirección General del Catastro (España)',
-            maxZoom: 20
-        });
+            // --- Elementos de la interfaz ---
+            const generarPasadasBtn = document.getElementById('generarPasadasBtn');
+            const workingWidthInput = document.getElementById('workingWidth');
+            const loadingStatusDiv = document.getElementById('loading-status'); // Referencia al indicador de carga
 
-        // --- Añade capas iniciales al mapa ---
-        // Mantenemos minimalBaseLayer como capa base por defecto
-        baseLayers["Fondo Claro Minimalista"].addTo(map);
-        overlayLayers["Cartografía Catastral (WMS)"].addTo(map);
+            // --- Capas base ---
+            // Capa Minimalista (Se mantiene)
+            baseLayers["Fondo Claro Minimalista"] = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
+            });
 
-        // --- Configura el control de capas (se actualizará al cargar GeoJSON y otros datos) ---
-        // Inicializa el control de capas por primera vez
-         updateLayersControl();
+            // Capa Satélite Esri (Se mantiene para el híbrido, pero se quita del selector de capas base)
+             const satelliteLayer = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                  attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DigitalGlobe, GeoEye, Earthstar Geographics, CNES/Airbus DS, GeoEye, Earthstar Geographics, CNES/Airbus DS, GeoEye, USDA FSA, USGS, AeroGRID, IGN, IGP, swisstopo, and the GIS User Community',
+                  maxZoom: 18
+             });
+
+            // Capa de Etiquetas Esri (Se mantiene para el híbrido)
+             const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                 attribution: 'Esri, Garmin, FAO, NOAA, USGS',
+                 maxZoom: 17,
+                 transparent: true
+               });
+
+            // Capa Híbrida (Satélite + Etiquetas) (Se mantiene)
+             baseLayers["Híbrido Satélite+Etiquetas (Esri)"] = L.layerGroup([satelliteLayer, esriOverlayLabels]);
 
 
-        // --- Funciones de carga de datos y actualización de interfaz ---
+            // --- Capa de superposición WMS de la Dirección General del Catastro ---
+            const catastroWmsUrl = 'https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx';
+            overlayLayers["Cartografía Catastral (WMS)"] = L.tileLayer.wms(catastroWmsUrl, {
+                layers: 'Catastro',
+                styles: '',
+                format: 'image/png',
+                transparent: true,
+                attribution: 'Cartografía &copy; Dirección General del Catastro (España)',
+                maxZoom: 20
+            });
 
-        // Función genérica para cargar GeoJSON y añadirlo al mapa (adaptada para promesas)
-        function loadGeoJSONLayer(url, layerName, style = {}) {
-            loadingStatusDiv.textContent = `Cargando ${layerName}...`;
-            console.log(`Iniciando carga de ${layerName} desde: ${url}`);
-            return fetch(url)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}, URL: ${url}`);
+            // --- Añade capas iniciales al mapa ---
+            // Mantenemos minimalBaseLayer como capa base por defecto
+            baseLayers["Fondo Claro Minimalista"].addTo(map);
+            overlayLayers["Cartografía Catastral (WMS)"].addTo(map);
+
+            // --- Configura el control de capas (inicializado aquí) ---
+            // Initialize the layers control for the first time AFTER map is defined
+            updateLayersControl(); // Llama a la función definida fuera
+
+
+            // --- Funciones de carga de datos y actualización de interfaz ---
+
+            // Función genérica para cargar GeoJSON y añadirlo al mapa (adaptada para promesas)
+            function loadGeoJSONLayer(url, layerName, style = {}) {
+                loadingStatusDiv.textContent = `Cargando ${layerName}...`;
+                console.log(`Iniciando carga de ${layerName} desde: ${url}`);
+                return fetch(url)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}, URL: ${url}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log(`${layerName} cargado con éxito. Número de features: ${data.features ? data.features.length : 'N/D'}`);
+                        const layer = L.geoJSON(data, { style: style }); // NO añadir a mapa inmediatamente en esta función
+                        return { name: layerName, layer: layer, data: data, error: null }; // Devolver info de la capa y datos
+                    })
+                    .catch(error => {
+                        console.error(`Error cargando ${layerName} desde ${url}:`, error);
+                        loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
+                        // No alertar por cada error individual en Promise.all, se gestiona al final.
+                        return { name: layerName, layer: null, data: null, error: error }; // Indicar que hubo un error
+                    });
+            }
+
+             // Función para cargar el GeoTIFF COG (ACTUALIZADA para intentar solucionar parseGeoRaster no definido y TypeError)
+             function loadGeoTIFFLayer(url, layerName, opacity = 0.5, style = {}) {
+                 loadingStatusDiv.textContent = `Cargando ${layerName}...`;
+                 console.log(`Iniciando carga de ${layerName} desde: ${url}`);
+
+                  // Verificar que Leaflet esté cargado antes de intentar usar GeoRasterLayer
+                  // NOTA: Esta verificación en tiempo de ejecución es un respaldo. El orden correcto de los SCRIPT tags es clave.
+                  if (typeof L === 'undefined' || typeof L.GridLayer === 'undefined') {
+                      const error = new Error("Leaflet o L.GridLayer no está cargado o inicializado correctamente.");
+                      console.error(`Error cargando ${layerName}: ${error.message}`);
+                       loadingStatusDiv.textContent = `Error cargando ${layerName}: Leaflet no listo.`;
+                       // Asegurarse de que el Promise.all pueda continuar aunque esta parte falle
+                       return Promise.resolve({ name: layerName, georaster: null, layer: null, error: error });
+                  }
+
+
+                  // Verificar si proj4js está cargado y la proyección está definida antes de intentar usarlo con georaster
+                 if (typeof proj4 === 'undefined' || !proj4.defs("EPSG:25830")) {
+                      const error = new Error("Proj4js o la definición EPSG:25830 no está disponible. No se cargará el GeoTIFF.");
+                      console.error(`Error cargando ${layerName}: ${error.message}`);
+                      loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
+                      return Promise.resolve({ name: layerName, georaster: null, layer: null, error: error });
+                 }
+
+                 return fetch(url)
+                     .then(response => {
+                         if (!response.ok) {
+                             throw new Error(`HTTP error! status: ${response.status}, URL: ${url}`);
+                         }
+                         return response.arrayBuffer();
+                     })
+                     .then(arrayBuffer => {
+                         console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
+                          // *** Intentar acceder a parseGeoRaster de forma segura ***
+                          let parseFn = undefined;
+
+                          // Un paquete global debería exponer parseGeoRaster globalmente o bajo window.GeoRaster
+                          // También verificamos window.georaster y si GeoRasterLayer tiene el método, por robustez.
+                          if (typeof parseGeoRaster !== 'undefined') { // Ámbito global
+                               parseFn = parseGeoRaster;
+                               console.log("parseFn encontrado en ámbito global.");
+                          } else if (typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.parseGeoRaster === 'function') {
+                               // Bajo window.GeoRaster (nombre común)
+                               parseFn = window.GeoRaster.parseGeoRaster;
+                               console.log("parseFn encontrado bajo window.GeoRaster.");
+                          } else if (typeof window.georaster !== 'undefined' && typeof window.georaster.parseGeoRaster === 'function') {
+                               // Bajo window.georaster (nombre común en minúsculas)
+                               parseFn = window.georaster.parseGeoRaster;
+                               console.log("parseFn encontrado bajo window.georaster.");
+                          } else if (typeof window.GeoRasterLayer !== 'undefined' && typeof window.GeoRasterLayer.parseGeoRaster === 'function') {
+                               // A veces, la función de parseo está adjunta al constructor de la capa
+                               parseFn = window.GeoRasterLayer.parseGeoRaster;
+                               console.log("parseFn encontrado bajo window.GeoRasterLayer.");
+                           }
+
+
+                         if (typeof parseFn === 'undefined') {
+                              // Si no se encuentra
+                               console.error("parseGeoRaster (o similar) no definido en las ubicaciones esperadas.");
+                               console.log("Contenido de window.GeoRaster para depuración:", typeof window.GeoRaster !== 'undefined' ? window.GeoRaster : 'undefined');
+                               console.log("Contenido de window.georaster para depuración:", typeof window.georaster !== 'undefined' ? window.georaster : 'undefined');
+                               console.log("Contenido de window.GeoRasterLayer para depuración:", typeof window.GeoRasterLayer !== 'undefined' ? window.GeoRasterLayer : 'undefined');
+
+                               // Debugging: If GeoRasterLayer is defined, inspect its properties to see what's there.
+                               if (typeof window.GeoRasterLayer !== 'undefined') {
+                                    console.log("Propiedades de window.GeoRasterLayer para depuración:", Object.keys(window.GeoRasterLayer));
+                                    // Also check the prototype properties if it's a class/constructor
+                                     if (window.GeoRasterLayer.prototype) {
+                                         console.log("Propiedades del prototipo de window.GeoRasterLayer:", Object.keys(window.GeoRasterLayer.prototype));
+                                     }
+                               }
+
+
+                               const error = new Error("Librería GeoRaster no cargada correctamente o parseFn no encontrado.");
+                               loadingStatusDiv.textContent = `Error cargando ${layerName}: parseFn no encontrado.`;
+                               return Promise.reject(error); // Rechazar la promesa para que Promise.all falle
+                         }
+
+                         // Usar la función parseFn encontrada
+                         return parseFn(arrayBuffer); // Esto devuelve una Promise
+
+                     })
+                     .then(georaster => {
+                         console.log("GeoRaster de elevación parseado con éxito:", georaster);
+                          // Verificar que GeoRasterLayer esté cargado antes de usarlo
+                           if (typeof GeoRasterLayer === 'undefined') {
+                                const error = new Error("Librería GeoRasterLayer no cargada correctamente.");
+                                 console.error(`Error cargando ${layerName}: ${error.message}`);
+                                 loadingStatusDiv.textContent = `Error cargando ${layerName}: GeoRasterLayer no encontrado.`;
+                                 return Promise.resolve({ name: layerName, georaster: georaster, layer: null, error: error }); // Resolver, pero con error
+                           }
+
+                          // Crear la capa de Leaflet a partir del objeto GeoRaster.
+                          // georaster-layer-for-leaflet usa proj4js para re-proyectar al vuelo.
+                          const layer = new GeoRasterLayer({
+                              georaster: georaster,
+                              opacity: opacity,
+                              // pixelValuesToColorFn: ... // Puedes añadir estilo aquí
+                              // range: ...
+                              // colors: ...
+                          });
+                          console.log(`${layerName} cargado con éxito.`);
+                          return { name: layerName, georaster: georaster, layer: layer, error: null }; // Devolver info y el objeto georaster
+                     })
+                     .catch(error => {
+                          console.error(`Error cargando y parseando GeoTIFF de ${layerName} desde ${url}:`, error);
+                           loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
+                           // No alertar por cada error individual
+                           return { name: layerName, georaster: null, layer: null, error: error }; // Indicar error
+                     });
+             }
+
+
+            // --- Carga automática de datos al cargar la página ---
+            document.addEventListener('DOMContentLoaded', function() {
+                console.log("El DOM está cargado. Iniciando carga automática de datos geoespaciales.");
+                console.log("Estado de exclusionFeatures global al inicio del DOMContentLoaded:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null');
+                loadingStatusDiv.textContent = 'Cargando datos...';
+                generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
+
+
+                // *** URLs de TUS ARCHIVOS EN GITHUB RAW ***
+                // ** IMPORTANTE: Para evitar errores CORS, asegúrate de que tu página HTML también se sirve desde un servidor web (no abrir directamente desde file:///...). **
+                // ** Las URLs raw.githubusercontent.com suelen permitir CORS si la página se sirve vía http/https. **
+                const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
+                const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
+                const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
+                const mdtUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL del GeoTIFF COG de elevación (0.93 MB)
+                const contourLinesUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/BTN0201L_CUR_NIV.json'; // URL del GeoJSON de curvas de nivel simplificadas (aprox 6.32 MB)
+                // *** FIN URLs ***
+
+                const units = 'meters'; // Unidades para Turf.js (buffer)
+                const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
+
+
+                // Usar Promise.all para cargar todos los archivos concurrentemente
+                Promise.all([
+                    loadGeoJSONLayer(parcelasGeojsonDataUrl, 'Mis Parcelas', { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }), // Estilo por defecto de parcela
+                    loadGeoJSONLayer(construccionesGeojsonDataUrl, 'Construcciones', { color: 'red', weight: 2, opacity: 0.7, fillOpacity: 0.3 }),
+                    loadGeoJSONLayer(elementosInternosGeojsonDataUrl, 'Viales y Arroyos', { // Estilo adaptado para líneas/polígonos
+                               style: feature => {
+                                    if (feature.geometry && feature.geometry.type === 'LineString') {
+                                         return { color: '#0000FF', weight: 2, opacity: 0.8 };
+                                    } else if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+                                         return { color: '#006400', weight: 1, fillColor: '#006400', fillOpacity: 0.3 };
+                                    }
+                                    return { color: '#888888', weight: 1, opacity: 0.5 };
+                               }
+                            }),
+                    loadGeoTIFFLayer(mdtUrl, 'Elevación (MDT25)', 0.5), // Cargar el GeoTIFF
+                    loadGeoJSONLayer(contourLinesUrl, 'Curvas de Nivel', { color: '#888', weight: 1, opacity: 0.7 }) // Cargar Curvas de Nivel GeoJSON
+                ])
+                .then(results => {
+                    console.log("Resultados de carga de Promise.all:", results);
+                    let allKeyDataLoadedSuccessfully = true; // Bandera para verificar si todos los archivos clave cargaron sin error
+
+                    // Procesar los resultados de la carga
+                     results.forEach(result => {
+                         if (result.error) {
+                              allKeyDataLoadedSuccessfully = false;
+                              // El error ya fue loggeado en la función de carga.
+                              // Podemos mostrar un mensaje de error general al final si allKeyDataLoadedSuccessfully es false
+                         } else {
+                             // Si la carga fue exitosa, procesar y añadir la capa al mapa/control
+                             if (result.name === 'Mis Parcelas') {
+                                 parcelasLayer = result.layer;
+                                 parcelasGeoJSON = result.data;
+                                 if (parcelasGeoJSON && parcelasGeoJSON.features) {
+                                     populateSelect('parcel-select', parcelasGeoJSON, 'CODIGO'); // Poblar el selector de parcela
+                                      // Añadir la capa de Parcelas al mapa y al control de capas
+                                     if (parcelasLayer) {
+                                          parcelasLayer.addTo(map);
+                                           overlayLayers["Mis Parcelas"] = parcelasLayer;
+                                      } else { console.warn("La capa de Parcelas no se pudo crear."); } // Ya se marcó el error general arriba
+                                 } else { console.warn("Datos de Parcelas nulos o sin features."); } // Ya se marcó el error general arriba
+                             } else if (result.name === 'Construcciones') {
+                                  construccionesLayer = result.layer;
+                                  // Recopilar geometrías de exclusión (Polygon/MultiPolygon) si los datos son válidos
+                                  if (result.data && result.data.features) {
+                                      result.data.features.forEach(feature => {
+                                          if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+                                              window.exclusionFeatures.push(JSON.parse(JSON.stringify(feature)));
+                                          }
+                                      });
+                                       // Añadir capa al mapa y control
+                                      if (construccionesLayer) {
+                                           construccionesLayer.addTo(map);
+                                            overlayLayers["Construcciones"] = construccionesLayer;
+                                      } else { console.warn("La capa de Construcciones no se pudo crear."); }
+                                  } else { console.warn("Datos de Construcciones nulos o vacíos."); }
+                             } else if (result.name === 'Viales y Arroyos') {
+                                  elementosInternosLayer = result.layer;
+                                  // Recopilar geometrías de exclusión (LineString -> Buffer, Polygon/MultiPolygon) si los datos son válidos
+                                   if (result.data && result.data.features) {
+                                       result.data.features.forEach(feature => {
+                                           if (feature.geometry) {
+                                               if (feature.geometry.type === 'LineString') {
+                                                    try {
+                                                        // Asegurarse de que turf está cargado antes de buffer
+                                                        if (typeof turf !== 'undefined') {
+                                                             const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
+                                                              // El buffer puede producir un FeatureCollection si el input es multi-geometría, o null si falla
+                                                              if (buffered && buffered.features && buffered.features.length > 0) {
+                                                                   // Si es FeatureCollection, añadir las geometrías resultantes
+                                                                   buffered.features.forEach(bf => {
+                                                                        if(bf.geometry && (bf.geometry.type === 'Polygon' || bf.geometry.type === 'MultiPolygon')) {
+                                                                             window.exclusionFeatures.push(JSON.parse(JSON.stringify(bf)));
+                                                                        } else { console.warn("Buffer de LineString produjo feature no poligonal:", bf); }
+                                                                   });
+                                                              } else if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
+                                                                   // Si es un solo Feature con Polygon/MultiPolygon
+                                                                    window.exclusionFeatures.push(JSON.parse(JSON.stringify(buffered)));
+                                                              }
+                                                              else {
+                                                                   console.warn("Buffer de LineString no válido para exclusión (no FeatureCollection ni Feature válido):", feature, buffered);
+                                                              }
+                                                        } else { console.error("Turf.js no cargado para buffer de Linea."); }
+
+                                                    } catch(e) { console.error("Error buffer LineString:", e); }
+                                               } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                                                    window.exclusionFeatures.push(JSON.parse(JSON.stringify(feature)));
+                                               }
+                                           }
+                                       });
+                                        // Añadir capa al mapa y control (el estilo ya maneja LineString y Polygon)
+                                       if (elementosInternosLayer) {
+                                            elementosInternosLayer.addTo(map);
+                                            overlayLayers["Viales y Arroyos"] = elementosInternosLayer;
+                                       } else { console.warn("La capa de Viales y Arroyos no se pudo crear."); }
+                                   } else { console.warn("Datos de Viales y Arroyos nulos o vacíos."); }
+                             } else if (result.name === 'Elevación (MDT25)') {
+                                 elevationGeoRaster = result.georaster; // Almacenar el objeto georaster
+                                  if (result.layer) { // Asegurarse de que la capa Leaflet se creó
+                                      overlayLayers["Elevación (MDT25)"] = result.layer; // Añadir capa al control
+                                      result.layer.addTo(map); // Añadir al mapa
+                                  } else { console.warn("La capa Leaflet de Elevación no se pudo crear."); }
+                                 if (typeof elevationGeoRaster === 'undefined' || elevationGeoRaster === null) { console.warn("Objeto georaster de elevación nulo después de la carga."); } // Ya se marcó el error general arriba
+                             } else if (result.name === 'Curvas de Nivel') {
+                                 contourLinesGeoJSON = result.data; // Almacenar los datos GeoJSON de curvas de nivel
+                                   if (result.layer) { // Asegurarse de que la capa Leaflet se creó
+                                        overlayLayers["Curvas de Nivel"] = result.layer; // Añadir capa al control
+                                        result.layer.addTo(map); // Añadir al mapa
+                                   } else { console.warn("La capa Leaflet de Curvas de Nivel no se pudo crear."); }
+                                  if (typeof contourLinesGeoJSON === 'undefined' || contourLinesGeoJSON === null || !contourLinesGeoJSON.features) { console.warn("Datos GeoJSON de Curvas de Nivel nulos o sin features."); } // Ya se marcó el error general arriba
+                             }
+
+                              // Las capas de Construcciones, Viales, Elevación y Curvas de Nivel se añaden
+                              // dentro de sus respectivos bloques if/else if arriba si se crearon correctamente.
+                              // La capa de Parcelas también se añade arriba.
+
+                         }
+                     });
+
+                     console.log(`Total features de exclusión recopiladas: ${window.exclusionFeatures.length}`);
+                     console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures);
+
+
+                    // Actualizar el control de capas final
+                    console.log("Intentando llamar a updateLayersControl..."); // Debug log antes de llamar
+                    updateLayersControl();
+                    console.log("Called updateLayersControl after Promise.all"); // Debug log después de llamar
+
+
+                    // Ajustar la vista del mapa a la extensión de las Parcelas si se cargaron
+                    if (parcelasLayer && parcelasLayer.getBounds().isValid()) {
+                         map.fitBounds(parcelasLayer.getBounds());
+                    } else {
+                         console.warn("No se pudieron obtener bounds válidos de la capa de parcelas. Ajustando vista a Ronda...");
+                          map.setView([36.7462, -5.1612], 14); // Fallback
                     }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log(`${layerName} cargado con éxito. Número de features: ${data.features ? data.features.length : 'N/D'}`);
-                    const layer = L.geoJSON(data, { style: style }); // NO añadir a mapa inmediatamente en esta función
-                    return { name: layerName, layer: layer, data: data, error: null }; // Devolver info de la capa y datos
+
+                     // Habilitar el botón si todos los datos CLAVE cargaron sin errores reportados en Promise.all
+                     // Los datos clave son: Parcelas (geoJSON y layer), Elevación (georaster y layer), Curvas de Nivel (geoJSON y layer)
+                     // Asumimos que si turf, parcelasGeoJSON, elevationGeoRaster, contourLinesGeoJSON existen,
+                     // las librerías y datos clave están disponibles.
+                     if (typeof turf !== 'undefined' && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
+                         loadingStatusDiv.textContent = 'Datos cargados. Selecciona una parcela.';
+                         // El botón se habilita en el evento 'change' del selector si la parcela es válida
+                         // Y si los datos clave cargaron.
+                         // No habilitar aquí, se habilita en el evento 'change' si todo está listo.
+                         console.log("Carga automática de datos finalizada con éxito (verificaciones de datos clave). Esperando selección de parcela.");
+                     } else {
+                          loadingStatusDiv.textContent = 'Carga de datos completada con errores o datos faltantes.';
+                          console.error("La carga automática de datos finalizó, pero faltan datos clave. El botón de generar pasadas está deshabilitado.");
+                          // Puedes añadir logs más específicos aquí si quieres saber qué faltó exactamente
+                     }
+
+
                 })
                 .catch(error => {
-                    console.error(`Error cargando ${layerName} desde ${url}:`, error);
-                    loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
-                    // No alertar por cada error individual en Promise.all, se gestiona al final.
-                    return { name: layerName, layer: null, data: null, error: error }; // Indicar que hubo un error
+                     // Este catch se ejecutará si Promise.all falla catastróficamente,
+                     // pero los errores individuales ya se manejan en cada función de carga.
+                    console.error("Error inesperado en Promise.all durante la carga de datos:", error);
+                    loadingStatusDiv.textContent = `Error crítico durante la carga: ${error.message}`;
+                    alert(`Ocurrió un error crítico durante la carga de datos. Revisa la consola para detalles.`);
                 });
-        }
-
-         // Función para cargar el GeoTIFF COG (ACTUALIZADA para intentar solucionar parseGeoRaster no definido y TypeError)
-         function loadGeoTIFFLayer(url, layerName, opacity = 0.5, style = {}) {
-             loadingStatusDiv.textContent = `Cargando ${layerName}...`;
-             console.log(`Iniciando carga de ${layerName} desde: ${url}`);
-
-              // Verificar que Leaflet esté cargado antes de intentar usar GeoRasterLayer
-              // NOTA: Esta verificación en tiempo de ejecución es un respaldo. El orden correcto de los SCRIPT tags es clave.
-              if (typeof L === 'undefined' || typeof L.GridLayer === 'undefined') {
-                  const error = new Error("Leaflet o L.GridLayer no está cargado o inicializado correctamente.");
-                  console.error(`Error cargando ${layerName}: ${error.message}`);
-                   loadingStatusDiv.textContent = `Error cargando ${layerName}: Leaflet no listo.`;
-                   // Asegurarse de que el Promise.all pueda continuar aunque esta parte falle
-                   return Promise.resolve({ name: layerName, georaster: null, layer: null, error: error });
-              }
-
-
-              // Verificar si proj4js está cargado y la proyección está definida antes de intentar usarlo con georaster
-             if (typeof proj4 === 'undefined' || !proj4.defs("EPSG:25830")) {
-                  const error = new Error("Proj4js o la definición EPSG:25830 no está disponible. No se cargará el GeoTIFF.");
-                  console.error(`Error cargando ${layerName}: ${error.message}`);
-                  loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
-                  return Promise.resolve({ name: layerName, georaster: null, layer: null, error: error });
-             }
-
-             return fetch(url)
-                 .then(response => {
-                     if (!response.ok) {
-                         throw new Error(`HTTP error! status: ${response.status}, URL: ${url}`);
-                     }
-                     return response.arrayBuffer();
-                 })
-                 .then(arrayBuffer => {
-                     console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
-                      // *** Intentar acceder a parseGeoRaster de forma segura ***
-                      let parseFn = undefined;
-
-                      // Un paquete global debería exponer parseGeoRaster globalmente o bajo window.GeoRaster
-                      // También verificamos window.georaster y si GeoRasterLayer tiene el método, por robustez.
-                      if (typeof parseGeoRaster !== 'undefined') { // Ámbito global
-                           parseFn = parseGeoRaster;
-                           console.log("parseFn encontrado en ámbito global.");
-                      } else if (typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.parseGeoRaster === 'function') {
-                           // Bajo window.GeoRaster (nombre común)
-                           parseFn = window.GeoRaster.parseGeoRaster;
-                           console.log("parseFn encontrado bajo window.GeoRaster.");
-                      } else if (typeof window.georaster !== 'undefined' && typeof window.georaster.parseGeoRaster === 'function') {
-                           // Bajo window.georaster (nombre común en minúsculas)
-                           parseFn = window.georaster.parseGeoRaster;
-                           console.log("parseFn encontrado bajo window.georaster.");
-                      } else if (typeof window.GeoRasterLayer !== 'undefined' && typeof window.GeoRasterLayer.parseGeoRaster === 'function') {
-                           // A veces, la función de parseo está adjunta al constructor de la capa
-                           parseFn = window.GeoRasterLayer.parseGeoRaster;
-                           console.log("parseFn encontrado bajo window.GeoRasterLayer.");
-                       }
-
-
-                     if (typeof parseFn === 'undefined') {
-                          // Si no se encuentra
-                           console.error("parseGeoRaster (o similar) no definido en las ubicaciones esperadas.");
-                           console.log("Contenido de window.GeoRaster para depuración:", typeof window.GeoRaster !== 'undefined' ? window.GeoRaster : 'undefined');
-                           console.log("Contenido de window.georaster para depuración:", typeof window.georaster !== 'undefined' ? window.georaster : 'undefined');
-                           console.log("Contenido de window.GeoRasterLayer para depuración:", typeof window.GeoRasterLayer !== 'undefined' ? window.GeoRasterLayer : 'undefined');
-
-
-                           const error = new Error("Librería GeoRaster no cargada correctamente o parseFn no encontrado.");
-                           loadingStatusDiv.textContent = `Error cargando ${layerName}: parseFn no encontrado.`;
-                           return Promise.reject(error); // Rechazar la promesa para que Promise.all falle
-                     }
-
-                     // Usar la función parseFn encontrada
-                     return parseFn(arrayBuffer); // Esto devuelve una Promise
-
-                 })
-                 .then(georaster => {
-                     console.log("GeoRaster de elevación parseado con éxito:", georaster);
-                      // Verificar que GeoRasterLayer esté cargado antes de usarlo
-                       if (typeof GeoRasterLayer === 'undefined') {
-                            const error = new Error("Librería GeoRasterLayer no cargada correctamente.");
-                             console.error(`Error cargando ${layerName}: ${error.message}`);
-                             loadingStatusDiv.textContent = `Error cargando ${layerName}: GeoRasterLayer no encontrado.`;
-                             return Promise.resolve({ name: layerName, georaster: georaster, layer: null, error: error }); // Resolver, pero con error
-                       }
-
-                      // Crear la capa de Leaflet a partir del objeto GeoRaster.
-                      // georaster-layer-for-leaflet usa proj4js para re-proyectar al vuelo.
-                      const layer = new GeoRasterLayer({
-                          georaster: georaster,
-                          opacity: opacity,
-                          // pixelValuesToColorFn: ... // Puedes añadir estilo aquí
-                          // range: ...
-                          // colors: ...
-                      });
-                      console.log(`${layerName} cargado con éxito.`);
-                      return { name: layerName, georaster: georaster, layer: layer, error: null }; // Devolver info y el objeto georaster
-                 })
-                 .catch(error => {
-                      console.error(`Error cargando y parseando GeoTIFF de ${layerName} desde ${url}:`, error);
-                       loadingStatusDiv.textContent = `Error cargando ${layerName}.`;
-                       // No alertar por cada error individual
-                       return { name: layerName, georaster: null, layer: null, error: error }; // Indicar error
-                 });
-         }
-
-
-        // --- Carga automática de datos al cargar la página ---
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log("El DOM está cargado. Iniciando carga automática de datos geoespaciales.");
-            console.log("Estado de exclusionFeatures global al inicio del DOMContentLoaded:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null');
-            loadingStatusDiv.textContent = 'Cargando datos...';
-            generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
-
-
-            // *** URLs de TUS ARCHIVOS EN GITHUB RAW ***
-            // ** IMPORTANTE: Para evitar errores CORS, asegúrate de que tu página HTML también se sirve desde un servidor web (no abrir directamente desde file:///...). **
-            // ** Las URLs raw.githubusercontent.com suelen permitir CORS si la página se sirve vía http/https. **
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
-            const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
-            const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
-            const mdtUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL del GeoTIFF COG de elevación (0.93 MB)
-            const contourLinesUrl = 'https://raw.githubusercontent.com/tinajita/parcela/main/BTN0201L_CUR_NIV.json'; // URL del GeoJSON de curvas de nivel simplificadas (aprox 6.32 MB)
-            // *** FIN URLs ***
-
-            const units = 'meters'; // Unidades para Turf.js (buffer)
-            const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
-
-
-            // Usar Promise.all para cargar todos los archivos concurrentemente
-            Promise.all([
-                loadGeoJSONLayer(parcelasGeojsonDataUrl, 'Mis Parcelas', { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }), // Estilo por defecto de parcela
-                loadGeoJSONLayer(construccionesGeojsonDataUrl, 'Construcciones', { color: 'red', weight: 2, opacity: 0.7, fillOpacity: 0.3 }),
-                loadGeoJSONLayer(elementosInternosGeojsonDataUrl, 'Viales y Arroyos', { // Estilo adaptado para líneas/polígonos
-                           style: feature => {
-                                if (feature.geometry && feature.geometry.type === 'LineString') {
-                                     return { color: '#0000FF', weight: 2, opacity: 0.8 };
-                                } else if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
-                                     return { color: '#006400', weight: 1, fillColor: '#006400', fillOpacity: 0.3 };
-                                }
-                                return { color: '#888888', weight: 1, opacity: 0.5 };
-                           }
-                        }),
-                loadGeoTIFFLayer(mdtUrl, 'Elevación (MDT25)', 0.5), // Cargar el GeoTIFF
-                loadGeoJSONLayer(contourLinesUrl, 'Curvas de Nivel', { color: '#888', weight: 1, opacity: 0.7 }) // Cargar Curvas de Nivel GeoJSON
-            ])
-            .then(results => {
-                console.log("Resultados de carga de Promise.all:", results);
-                let allKeyDataLoadedSuccessfully = true; // Bandera para verificar si todos los archivos clave cargaron sin error
-
-                // Procesar los resultados de la carga
-                 results.forEach(result => {
-                     if (result.error) {
-                          allKeyDataLoadedSuccessfully = false;
-                          // El error ya fue loggeado en la función de carga.
-                          // Podemos mostrar un mensaje de error general al final si allKeyDataLoadedSuccessfully es false
-                     } else {
-                         // Si la carga fue exitosa, procesar y añadir la capa al mapa/control
-                         if (result.name === 'Mis Parcelas') {
-                             parcelasLayer = result.layer;
-                             parcelasGeoJSON = result.data;
-                             if (parcelasGeoJSON && parcelasGeoJSON.features) {
-                                 populateSelect('parcel-select', parcelasGeoJSON, 'CODIGO'); // Poblar el selector de parcela
-                                  // Añadir la capa de Parcelas al mapa y al control de capas
-                                 if (parcelasLayer) {
-                                      parcelasLayer.addTo(map);
-                                       overlayLayers["Mis Parcelas"] = parcelasLayer;
-                                  } else { console.warn("La capa de Parcelas no se pudo crear."); } // Ya se marcó el error general arriba
-                             } else { console.warn("Datos de Parcelas nulos o sin features."); } // Ya se marcó el error general arriba
-                         } else if (result.name === 'Construcciones') {
-                              construccionesLayer = result.layer;
-                              // Recopilar geometrías de exclusión (Polygon/MultiPolygon) si los datos son válidos
-                              if (result.data && result.data.features) {
-                                  result.data.features.forEach(feature => {
-                                      if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
-                                          window.exclusionFeatures.push(JSON.parse(JSON.stringify(feature)));
-                                      }
-                                  });
-                                   // Añadir capa al mapa y control
-                                  if (construccionesLayer) {
-                                       construccionesLayer.addTo(map);
-                                        overlayLayers["Construcciones"] = construccionesLayer;
-                                  } else { console.warn("La capa de Construcciones no se pudo crear."); }
-                              } else { console.warn("Datos de Construcciones nulos o vacíos."); }
-                         } else if (result.name === 'Viales y Arroyos') {
-                              elementosInternosLayer = result.layer;
-                              // Recopilar geometrías de exclusión (LineString -> Buffer, Polygon/MultiPolygon) si los datos son válidos
-                               if (result.data && result.data.features) {
-                                   result.data.features.forEach(feature => {
-                                       if (feature.geometry) {
-                                           if (feature.geometry.type === 'LineString') {
-                                                try {
-                                                    // Asegurarse de que turf está cargado antes de buffer
-                                                    if (typeof turf !== 'undefined') {
-                                                         const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
-                                                          // El buffer puede producir un FeatureCollection si el input es multi-geometría, o null si falla
-                                                          if (buffered && buffered.features && buffered.features.length > 0) {
-                                                               // Si es FeatureCollection, añadir las geometrías resultantes
-                                                               buffered.features.forEach(bf => {
-                                                                    if(bf.geometry && (bf.geometry.type === 'Polygon' || bf.geometry.type === 'MultiPolygon')) {
-                                                                         window.exclusionFeatures.push(JSON.parse(JSON.stringify(bf)));
-                                                                    } else { console.warn("Buffer de LineString produjo feature no poligonal:", bf); }
-                                                               });
-                                                          } else if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
-                                                               // Si es un solo Feature con Polygon/MultiPolygon
-                                                                window.exclusionFeatures.push(JSON.parse(JSON.stringify(buffered)));
-                                                          }
-                                                          else {
-                                                               console.warn("Buffer de LineString no válido para exclusión (no FeatureCollection ni Feature válido):", feature, buffered);
-                                                          }
-                                                    } else { console.error("Turf.js no cargado para buffer de Linea."); }
-
-                                                } catch(e) { console.error("Error buffer LineString:", e); }
-                                           } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
-                                                window.exclusionFeatures.push(JSON.parse(JSON.stringify(feature)));
-                                           }
-                                       }
-                                   });
-                                    // Añadir capa al mapa y control (el estilo ya maneja LineString y Polygon)
-                                   if (elementosInternosLayer) {
-                                        elementosInternosLayer.addTo(map);
-                                        overlayLayers["Viales y Arroyos"] = elementosInternosLayer;
-                                   } else { console.warn("La capa de Viales y Arroyos no se pudo crear."); }
-                               } else { console.warn("Datos de Viales y Arroyos nulos o vacíos."); }
-                         } else if (result.name === 'Elevación (MDT25)') {
-                             elevationGeoRaster = result.georaster; // Almacenar el objeto georaster
-                              if (result.layer) { // Asegurarse de que la capa Leaflet se creó
-                                  overlayLayers["Elevación (MDT25)"] = result.layer; // Añadir capa al control
-                                  result.layer.addTo(map); // Añadir al mapa
-                              } else { console.warn("La capa Leaflet de Elevación no se pudo crear."); }
-                             if (!elevationGeoRaster) { console.warn("Objeto georaster de elevación nulo después de la carga."); } // Ya se marcó el error general arriba
-                         } else if (result.name === 'Curvas de Nivel') {
-                             contourLinesGeoJSON = result.data; // Almacenar los datos GeoJSON de curvas de nivel
-                               if (result.layer) { // Asegurarse de que la capa Leaflet se creó
-                                    overlayLayers["Curvas de Nivel"] = result.layer; // Añadir capa al control
-                                    result.layer.addTo(map); // Añadir al mapa
-                               } else { console.warn("La capa Leaflet de Curvas de Nivel no se pudo crear."); }
-                              if (!contourLinesGeoJSON || !contourLinesGeoJSON.features) { console.warn("Datos GeoJSON de Curvas de Nivel nulos o sin features."); } // Ya se marcó el error general arriba
-                         }
-
-                          // Las capas de Construcciones, Viales, Elevación y Curvas de Nivel se añaden
-                          // dentro de sus respectivos bloques if/else if arriba si se crearon correctamente.
-                          // La capa de Parcelas también se añade arriba.
-
-                     }
-                 });
-
-                 console.log(`Total features de exclusión recopiladas: ${window.exclusionFeatures.length}`);
-                 console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures);
-
-
-                // Actualizar el control de capas final
-                updateLayersControl();
-                console.log("Called updateLayersControl after Promise.all");
-
-
-                // Ajustar la vista del mapa a la extensión de las Parcelas si se cargaron
-                if (parcelasLayer && parcelasLayer.getBounds().isValid()) {
-                     map.fitBounds(parcelasLayer.getBounds());
-                } else {
-                     console.warn("No se pudieron obtener bounds válidos de la capa de parcelas. Ajustando vista a Ronda...");
-                      map.setView([36.7462, -5.1612], 14); // Fallback
-                }
-
-                 // Habilitar el botón si todos los datos CLAVE cargaron sin errores reportados en Promise.all
-                 // Los datos clave son: Parcelas (geoJSON y layer), Elevación (georaster y layer), Curvas de Nivel (geoJSON y layer)
-                 // Asumimos que si parcelasGeoJSON, elevationGeoRaster y contourLinesGeoJSON
-                 // existen (no nulos), la carga inicial fue considerada exitosa para habilitar la lógica.
-                 if (typeof turf !== 'undefined' && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
-                     loadingStatusDiv.textContent = 'Datos cargados. Selecciona una parcela.';
-                     // El botón se habilita en el evento 'change' del selector si la parcela es válida
-                     // Y si los datos clave cargaron.
-                     // No habilitar aquí, se habilita en el evento 'change' si todo está listo.
-                     console.log("Carga automática de datos finalizada con éxito (verificaciones de datos clave). Esperando selección de parcela.");
-                 } else {
-                      loadingStatusDiv.textContent = 'Carga de datos completada con errores o datos faltantes.';
-                      console.error("La carga automática de datos finalizó, pero faltan datos clave. El botón de generar pasadas está deshabilitado.");
-                      // Puedes añadir logs más específicos aquí si quieres saber qué faltó exactamente
-                 }
-
-
-            })
-            .catch(error => {
-                 // Este catch se ejecutará si Promise.all falla catastróficamente,
-                 // pero los errores individuales ya se manejan en cada función de carga.
-                console.error("Error inesperado en Promise.all durante la carga de datos:", error);
-                loadingStatusDiv.textContent = `Error crítico durante la carga: ${error.message}`;
-                alert(`Ocurrió un error crítico durante la carga de datos. Revisa la consola para detalles.`);
             });
-        });
 
 
-        // Función para poblar un selector (select) con opciones de un FeatureCollection
-        function populateSelect(selectId, featureCollection, propertyName) {
-            const selectElement = document.getElementById(selectId);
-            if (!selectElement || !featureCollection || !featureCollection.features) {
-                console.warn(`No se pudo poblar el selector ${selectId}.`);
-                return;
-            }
-
-            // Limpiar opciones existentes (excepto la primera, si es una opción por defecto)
-            selectElement.innerHTML = '<option value="">-- Seleccionar --</option>';
-
-            featureCollection.features.forEach(feature => {
-                if (feature.properties && feature.properties[propertyName]) {
-                    const option = document.createElement('option');
-                    option.value = feature.properties[propertyName]; // Usar el código como valor
-                    option.textContent = feature.properties[propertyName]; // Mostrar el código como texto
-                    // También puedes mostrar otros atributos si son relevantes
-                    // option.textContent = `Código: ${feature.properties[propertyName]} - Tipo: ${feature.properties.TIPO || 'N/D'}`;
-                    selectElement.appendChild(option);
+            // Función para poblar un selector (select) con opciones de un FeatureCollection
+            function populateSelect(selectId, featureCollection, propertyName) {
+                const selectElement = document.getElementById(selectId);
+                if (!selectElement || !featureCollection || !featureCollection.features) {
+                    console.warn(`No se pudo poblar el selector ${selectId}.`);
+                    return;
                 }
-            });
-             console.log(`Selector '${selectId}' poblado con ${featureCollection.features.length} opciones.`);
-        }
 
-        // Manejar la selección de parcela
-        const parcelSelect = document.getElementById('parcel-select');
-        // Asegúrate de que el select de parcela existe en tu HTML. Se ha añadido en el código modificado.
-        if (parcelSelect) {
-            parcelSelect.addEventListener('change', (event) => {
-                const selectedCode = event.target.value;
+                // Limpiar opciones existentes (excepto la primera, si es una opción por defecto)
+                selectElement.innerHTML = '<option value="">-- Seleccionar --</option>';
 
-                // Limpiar selección anterior y estilo
-                if (selectedLayer) {
-                    // Restaurar estilo original si lo guardaste, o un estilo por defecto si no
-                    // Clonar para evitar modificar el objeto original en caso de que el estilo sea complejo
-                    const styleToRestore = originalStyle[selectedLayer._leaflet_id] ? JSON.parse(JSON.stringify(originalStyle[selectedLayer._leaflet_id])) : { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                    selectedLayer.setStyle(styleToRestore);
-                }
-                selectedLayer = null; // Limpiar la referencia a la capa Leaflet seleccionada
-                let selectedParcelGeoJSON = null; // Variable para almacenar el GeoJSON del feature seleccionado
-
-                generarPasadasBtn.disabled = true; // Deshabilitar botón hasta seleccionar una válida
-
-                if (selectedCode && parcelasGeoJSON && parcelasGeoJSON.features) {
-                     const featureFound = parcelasGeoJSON.features.find(feature => feature.properties && feature.properties.CODIGO === selectedCode);
-
-                    if (featureFound) {
-                         // Si modificas el estilo de la capa existente (como en el original)
-                         if (parcelasLayer) { // Asegúrate de que la capa de parcelas esté cargada
-                              parcelasLayer.eachLayer(layer => {
-                                   if (layer.feature && layer.feature.properties && layer.feature.properties.CODIGO === selectedCode) {
-                                        // Guardar el estilo original antes de aplicarle el estilo de selección
-                                        // Clonar para evitar modificar el objeto original en caso de que el estilo sea complejo
-                                        originalStyle[layer._leaflet_id] = layer.options.style ? JSON.parse(JSON.stringify(layer.options.style)) : { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                                        layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
-                                        selectedLayer = layer; // Guarda la referencia a la capa Leaflet seleccionada
-                                        selectedParcelGeoJSON = layer.feature; // Guarda el GeoJSON del feature seleccionado
-                                        // Acercar el mapa SOLO si la capa tiene bounds válidos (algunos GeoJSONs pueden ser puntos o líneas sin extent claro)
-                                        if (layer.getBounds && layer.getBounds().isValid()) {
-                                              map.fitBounds(layer.getBounds()); // Acercar el mapa
-                                        } else if (layer.getLatLng) { // Si es un punto
-                                              map.setView(layer.getLatLng(), 16); // Acercar a un punto con un zoom fijo
-                                        }
-
-
-                                        // Habilitar botón solo si la parcela es válida Y los datos clave ya cargaron
-                                        // Asumimos que si turf, parcelasGeoJSON, elevationGeoRaster, contourLinesGeoJSON existen,
-                                        // las librerías y datos clave están disponibles.
-                                        if (typeof turf !== 'undefined' && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
-                                             generarPasadasBtn.disabled = false;
-                                        } else {
-                                             console.warn("Faltan librerías o datos necesarios para habilitar el botón de generar pasadas.");
-                                        }
-
-
-                                        console.log("Parcela seleccionada:", selectedParcelGeoJSON.properties);
-                                        L.DomEvent.stopPropagation(event); // Evitar propagación del clic si fuera relevante
-
-                                        // Aquí podrías añadir lógica para filtrar y mostrar las exclusiones relevantes a esta parcela
-                                        // o para realizar alguna otra acción específica de la parcela.
-
-                                   } else {
-                                        // Asegurarse de que las otras parcelas tengan su estilo original
-                                        // Usar el estilo guardado, o el estilo por defecto si no se guardó (aunque debería haberse guardado)
-                                         const styleToRestore = originalStyle[layer._leaflet_id] ? JSON.parse(JSON.stringify(originalStyle[layer._leaflet_id])) : { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                                        layer.setStyle(styleToRestore);
-                                   }
-                              });
-                         } else {
-                             console.warn("La capa de parcelas no está cargada al intentar seleccionar.");
-                         }
-
-                    } else {
-                        console.warn("No se encontró la parcela con el código:", selectedCode, "en los datos cargados.");
-                        // alert("No se encontró la parcela seleccionada en los datos cargados."); // Evitar alert, el log es suficiente
+                featureCollection.features.forEach(feature => {
+                    if (feature.properties && feature.properties[propertyName]) {
+                        const option = document.createElement('option');
+                        option.value = feature.properties[propertyName]; // Usar el código como valor
+                        option.textContent = feature.properties[propertyName]; // Mostrar el código como texto
+                        // También puedes mostrar otros atributos si son relevantes
+                        // option.textContent = `Código: ${feature.properties[propertyName]} - Tipo: ${feature.properties.TIPO || 'N/D'}`;
+                        selectElement.appendChild(option);
                     }
-                }
-                // Si selectedParcelGeoJSON es null al final (no se encontró o seleccionó '-- Seleccionar --'), el botón seguirá deshabilitado.
-            });
-        } else {
-             console.error("Elemento 'parcel-select' no encontrado en el DOM. Asegúrate de que está en tu HTML.");
-        }
-
-
-        // El selector 'avoid-select' en el HTML original no tenía funcionalidad asociada.
-        // Si necesitas implementar la selección de zonas a evitar desde un select, necesitarías
-        // poblarlo con opciones (ej. IDs de construcciones/viales) y manejar su selección.
-        // La variable global `window.exclusionFeatures` ya contiene las geometrías de exclusión cargadas
-        // (Construcciones y Elementos Linea con buffer si eran líneas).
-        // Tu lógica en el evento click ya filtra las que intersectan con la parcela seleccionada
-        // y las usa para calcular el área limpia. Puedes usar esa variable.
-        // Si quieres poder SELECCIONAR zonas a evitar manualmente en el mapa, necesitarías:
-        // 1. Hacer las capas de Construcciones y Viales interactivas (onEachFeature con click listeners).
-        // 2. Tener una forma (ej. un botón o modo) para indicar que estás seleccionando zonas a evitar.
-        // 3. Al hacer clic en una feature de Construcción o Vial, añadir su geometría (o su buffer si es LineString)
-        //    a una lista TEMPORAL de "zonas a evitar seleccionadas por el usuario" para la generación de pasadas actual.
-        // 4. Usar esta lista TEMPORAL en la lógica de exclusión dentro del botón de generar pasadas,
-        //    EN LUGAR de (o además de) usar la variable global `window.exclusionFeatures` completa.
-        // 5. Proporcionar alguna retroalimentación visual de las zonas a evitar seleccionadas por el usuario.
-        // Esta implementación es compleja y va más allá del alcance actual. Por ahora, la lógica usa TODAS
-        // las exclusiones cargadas que intersectan la parcela.
-
-
-        // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS Y DATOS DE ELEVACIÓN/CURVAS ---
-
-        generarPasadasBtn.addEventListener('click', function() {
-
-            // --- VERIFICACIÓN DE TURF ---
-            console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
-            if (typeof turf === 'undefined') {
-                console.error("Error: La biblioteca Turf.js no se cargó correctamente.");
-                alert("Error: La biblioteca Turf.js no está disponible. No se pueden generar pasadas. Revisa la consola.");
-                return;
+                });
+                 console.log(`Selector '${selectId}' poblado con ${featureCollection.features.length} opciones.`);
             }
-            // --- FIN VERIFICACIÓN ---
 
-            console.log("--- Inicio Generación de Pasadas ---");
+            // Manejar la selección de parcela
+            const parcelSelect = document.getElementById('parcel-select');
+            // Asegúrate de que el select de parcela existe en tu HTML. Se ha añadido en el código modificado.
+            if (parcelSelect) {
+                parcelSelect.addEventListener('change', (event) => {
+                    const selectedCode = event.target.value;
 
-            // --- Verificar que los datos necesarios estén cargados ---
-            if (!selectedLayer || !selectedLayer.feature || !selectedLayer.feature.geometry || (selectedLayer.feature.geometry.type !== 'Polygon' && selectedLayer.feature.geometry.type !== 'MultiPolygon')) {
-                 alert("Por favor, selecciona una parcela válida haciendo clic en ella primero.");
-                 console.warn("selectedLayer no es una parcela válida o no tiene geometría poligonal:", selectedLayer);
-                 return;
-             }
-             // Verificar que los datos clave para la lógica de elevación/curvas están disponibles
-             // Usamos la existencia de los objetos esperados como verificación
-            if (typeof elevationGeoRaster === 'undefined' || elevationGeoRaster === null) {
-                alert("Los datos de elevación (MDT) no están disponibles. No se puede generar pasadas sensibles al terreno.");
-                console.warn("Objeto georaster de elevación no disponible:", elevationGeoRaster);
-                return;
-            }
-             if (typeof contourLinesGeoJSON === 'undefined' || contourLinesGeoJSON === null || !contourLinesGeoJSON.features) {
-                 alert("Los datos de curvas de nivel no están disponibles. No se puede generar pasadas sensibles al terreno.");
-                 console.warn("Datos GeoJSON de curvas de nivel no disponibles o vacíos:", contourLinesGeoJSON);
-                 return;
-             }
+                    // Limpiar selección anterior y estilo
+                    if (selectedLayer) {
+                        // Restaurar estilo original si lo guardaste, o un estilo por defecto si no
+                        // Clonar para evitar modificar el objeto original en caso de que el estilo sea complejo
+                        const styleToRestore = originalStyle[selectedLayer._leaflet_id] ? JSON.parse(JSON.stringify(originalStyle[selectedLayer._leaflet_id])) : { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
+                        selectedLayer.setStyle(styleToRestore);
+                    }
+                    selectedLayer = null; // Limpiar la referencia a la capa Leaflet seleccionada
+                    let selectedParcelGeoJSON = null; // Variable para almacenar el GeoJSON del feature seleccionado
 
+                    generarPasadasBtn.disabled = true; // Deshabilitar botón hasta seleccionar una válida
 
-            const selectedParcelGeoJSON = selectedLayer.toGeoJSON();
-            let parcelGeometry = selectedParcelGeoJSON.geometry; // Geometría de la parcela seleccionada
-            const parcelFeature = turf.feature(parcelGeometry); // La parcela como feature para intersecciones
+                    if (selectedCode && parcelasGeoJSON && parcelasGeoJSON.features) {
+                         const featureFound = parcelasGeoJSON.features.find(feature => feature.properties && feature.properties.CODIGO === selectedCode);
 
-            generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores
-            console.log("Limpiando pasadas generadas anteriormente.");
-
-            // --- Obtener el ancho de trabajo del input ---
-            const workingWidth = parseFloat(workingWidthInput.value);
-            if (isNaN(workingWidth) || workingWidth <= 0) {
-                 alert("Por favor, introduce un valor válido y positivo para el ancho de trabajo.");
-                 console.error("Valor inválido para ancho de trabajo:", workingWidthInput.value);
-                 return;
-            }
-            // --- Fin Obtener ancho de trabajo ---
-
-            const units = 'meters'; // Unidades para Turf.js
-
-            // *** UMBRAL DE PENDIENTE ***
-            // Define aquí el porcentaje de pendiente a partir del cual el tractor debe seguir las curvas de nivel.
-            const slopeThresholdPercent = 10; // Ejemplo: 10% de pendiente. AJUSTA ESTE VALOR.
-            console.log(`Umbral de pendiente para cambio de lógica: ${slopeThresholdPercent}%`);
+                        if (featureFound) {
+                             // Si modificas el estilo de la capa existente (como en el original)
+                             if (parcelasLayer) { // Asegúrate de que la capa de parcelas esté cargada
+                                  parcelasLayer.eachLayer(layer => {
+                                       if (layer.feature && layer.feature.properties && layer.feature.properties.CODIGO === selectedCode) {
+                                            // Guardar el estilo original antes de aplicarle el estilo de selección
+                                            // Clonar para evitar modificar el objeto original en caso de que el estilo sea complejo
+                                            originalStyle[layer._leaflet_id] = layer.options.style ? JSON.parse(JSON.stringify(layer.options.style)) : { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
+                                            layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
+                                            selectedLayer = layer; // Guarda la referencia a la capa Leaflet seleccionada
+                                            selectedParcelGeoJSON = layer.feature; // Guarda el GeoJSON del feature seleccionado
+                                            // Acercar el mapa SOLO si la capa tiene bounds válidos (algunos GeoJSONs pueden ser puntos o líneas sin extent claro)
+                                            if (layer.getBounds && layer.getBounds().isValid()) {
+                                                  map.fitBounds(layer.getBounds()); // Acercar el mapa
+                                            } else if (layer.getLatLng) { // Si es un punto
+                                                  map.setView(layer.getLatLng(), 16); // Acercar a un punto con un zoom fijo
+                                            }
 
 
-            try {
-                // --- Lógica para obtener features de exclusión que intersectan con la parcela seleccionada (usando window.exclusionFeatures) ---
-                 let intersectingExclusionFeatures = []; // Array para almacenar las FEATURES de exclusión que INTERSECTAN
-                 const globalExclusionFeatures = window.exclusionFeatures || []; // Acceder a la variable global
+                                            // Habilitar botón solo si la parcela es válida Y los datos clave ya cargaron
+                                            // Asumimos que si turf, parcelasGeoJSON, elevationGeoRaster, contourLinesGeoJSON existen,
+                                            // las librerías y datos clave están disponibles.
+                                            if (typeof turf !== 'undefined' && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
+                                                 generarPasadasBtn.disabled = false;
+                                            } else {
+                                                 console.warn("Faltan librerías o datos necesarios para habilitar el botón de generar pasadas.");
+                                            }
 
-                 if (globalExclusionFeatures.length > 0) {
-                     console.log(`Filtrando features de exclusión para encontrar las que intersectan con la parcela seleccionada.`);
-                      globalExclusionFeatures.forEach((exclusionFeature) => {
-                         if (exclusionFeature.geometry && (exclusionFeature.geometry.type === 'Polygon' || exclusionFeature.geometry.type === 'MultiPolygon')) {
-                              try {
-                                  // booleanIntersects verifica si las geometrías se tocan o se cruzan.
-                                  if (turf.booleanIntersects(parcelFeature, exclusionFeature)) {
-                                     intersectingExclusionFeatures.push(exclusionFeature);
-                                  }
-                              } catch (e) { console.warn(`Error al verificar intersección para feature de exclusión. Se omitirá.`, exclusionFeature, e); }
-                         }
-                      });
-                 } else { console.log("No hay zonas de exclusión cargadas globalmente."); }
-                 console.log(`Features de exclusión que intersectan con la parcela seleccionada: ${intersectingExclusionFeatures.length}`);
 
-                // --- Calcular el área limpia (Parcela - Unión de ExclusionFeatures simplificadas que intersectan) ---
-                let geometryForCalculations = parcelGeometry; // Inicialmente es la parcela completa
+                                            console.log("Parcela seleccionada:", selectedParcelGeoJSON.properties);
+                                            L.DomEvent.stopPropagation(event); // Evitar propagación del clic si fuera relevante
 
-                // TU LÓGICA EXISTENTE PARA CALCULAR `geometryForCalculations`
-                // A PARTIR DE `parcelGeometry` y `intersectingExclusionFeatures` VA AQUÍ.
-                // (El código extenso que tenías antes con turf.union, turf.difference, turf.simplify)
-                // Asegúrate de que, if the exclusion logic runs, `geometryForCalculations`
-                // se actualice a la geometría del área limpia resultante (Polygon o MultiPolygon).
-                // Si no hay exclusiones o la lógica falla, `geometryForCalculations` debe seguir siendo la `parcelGeometry`.
+                                            // Aquí podrías añadir lógica para filtrar y mostrar las exclusiones relevantes a esta parcela
+                                            // o para realizar alguna otra acción específica de la parcela.
 
-                // EJEMPLO SIMPLIFICADO de cómo aplicar la diferencia si hay exclusiones
-                if (intersectingExclusionFeatures.length > 0) {
-                     try {
-                         // turf.union puede manejar múltiples polígonos/multipolígonos
-                         // Necesita ser FeatureCollection o un array de Features
-                         const unionFeatureCollection = turf.featureCollection(intersectingExclusionFeatures);
-                         // turf.union puede devolver null si la entrada no es válida para una unión
-                         const unionOfExclusions = unionFeatureCollection.features.length > 0 ? turf.union(...unionFeatureCollection.features) : null;
-
-                         if (unionOfExclusions && unionOfExclusions.geometry) {
-                             // turf.difference(feature1, feature2) feature1 - feature2
-                             const cleanedAreaFeature = turf.difference(parcelFeature, unionOfExclusions);
-
-                             if (cleanedAreaFeature && cleanedAreaFeature.geometry) {
-                                 geometryForCalculations = cleanedAreaFeature.geometry; // Usar la geometría del área limpia
-                                 console.log("Área limpia calculada después de exclusiones.");
-                                  // Opcional: Aplicar una ligera simplificación a la geometría del área limpia si es muy compleja
-                                  // try { geometryForCalculations = turf.simplify(turf.feature(geometryForCalculations), { tolerance: 0.00001, highQuality: true }).geometry; } catch(e) { console.warn("Error simplificando área limpia:", e); }
+                                       } else {
+                                            // Asegurarse de que las otras parcelas tengan su estilo original
+                                            // Usar el estilo guardado, o el estilo por defecto si no se guardó (aunque debería haberse guardado)
+                                             const styleToRestore = originalStyle[layer._leaflet_id] ? JSON.parse(JSON.stringify(originalStyle[layer._leaflet_id])) : { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
+                                            layer.setStyle(styleToRestore);
+                                       }
+                                  });
                              } else {
-                                console.warn("Resultado de turf.difference es nulo o sin geometría. Usando geometría de parcela completa para pasadas.");
-                                 alert("Advertencia: No se pudo calcular el área limpia correctamente. Generando pasadas sobre la parcela completa.");
+                                 console.warn("La capa de parcelas no está cargada al intentar seleccionar.");
                              }
-                         } else {
-                             console.warn("Resultado de turf.union de exclusiones es nulo o sin geometría. Usando geometría de parcela completa para pasadas.");
-                              // alert("Advertencia: No se pudo unir las áreas a evitar correctamente. Generando pasadas sobre la parcela completa."); // Evitar alert repetido
-                         }
-                     } catch (e) {
-                         console.error("Error en lógica de unión/diferencia para exclusiones:", e);
-                          alert("Error al excluir zonas a evitar. Generando pasadas sobre la parcela completa. Revisa consola.");
-                     }
-                 } else {
-                     console.log("No hay zonas a evitar que intersecten. Generando pasadas sobre la parcela completa.");
-                 }
+
+                        } else {
+                            console.warn("No se encontró la parcela con el código:", selectedCode, "en los datos cargados.");
+                            // alert("No se encontró la parcela seleccionada en los datos cargados."); // Evitar alert, el log es suficiente
+                        }
+                    }
+                    // Si selectedParcelGeoJSON es null al final (no se encontró o seleccionó '-- Seleccionar --'), el botón seguirá deshabilitado.
+                });
+            } else {
+                 console.error("Elemento 'parcel-select' no encontrado en el DOM. Asegúrate de que está en tu HTML.");
+            }
 
 
-                 // VALIDACIONES BÁSICAS del área para pasar
-                 if (!geometryForCalculations || !(geometryForCalculations.type === 'Polygon' || geometryForCalculations.type === 'MultiPolygon')) {
-                     console.error("La geometría final para cálculos no es un Polígono/MultiPolígono válido.");
-                     alert("Error: La geometría resultante para generar pasadas es inválida.");
+            // El selector 'avoid-select' en el HTML original no tenía funcionalidad asociada.
+            // Si necesitas implementar la selección de zonas a evitar desde un select, necesitarías
+            // poblarlo con opciones (ej. IDs de construcciones/viales) y manejar su selección.
+            // La variable global `window.exclusionFeatures` ya contiene las geometrías de exclusión cargadas
+            // (Construcciones y Elementos Linea con buffer si eran líneas).
+            // Tu lógica en el evento click ya filtra las que intersectan con la parcela seleccionada
+            // y las usa para calcular el área limpia. Puedes usar esa variable.
+            // Si quieres poder SELECCIONAR zonas a evitar manualmente en el mapa, necesitarías:
+            // 1. Hacer las capas de Construcciones y Viales interactivas (onEachFeature con click listeners).
+            // 2. Tener una forma (ej. un botón o modo) para indicar que estás seleccionando zonas a evitar.
+            // 3. Al hacer clic en una feature de Construcción o Vial, añadir su geometría (o su buffer si es LineString)
+            //    a una lista TEMPORAL de "zonas a evitar seleccionadas por el usuario" para la generación de pasadas actual.
+            // 4. Usar esta lista TEMPORAL en la lógica de exclusión dentro del botón de generar pasadas,
+            //    EN LUGAR de (o además de) usar la variable global `window.exclusionFeatures` completa.
+            // 5. Proporcionar alguna retroalimentación visual de las zonas a evitar seleccionadas por el usuario.
+            // Esta implementación es compleja y va más allá del alcance actual. Por ahora, la lógica usa TODAS
+            // las exclusiones cargadas que intersectan la parcela.
+
+
+            // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS Y DATOS DE ELEVACIÓN/CURVAS ---
+
+            generarPasadasBtn.addEventListener('click', function() {
+
+                // --- VERIFICACIÓN DE TURF ---
+                console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
+                if (typeof turf === 'undefined') {
+                    console.error("Error: La biblioteca Turf.js no se cargó correctamente.");
+                    alert("Error: La biblioteca Turf.js no está disponible. No se pueden generar pasadas. Revisa la consola.");
+                    return;
+                }
+                // --- FIN VERIFICACIÓN ---
+
+                console.log("--- Inicio Generación de Pasadas ---");
+
+                // --- Verificar que los datos necesarios estén cargados ---
+                if (!selectedLayer || !selectedLayer.feature || !selectedLayer.feature.geometry || (selectedLayer.feature.geometry.type !== 'Polygon' && selectedLayer.feature.geometry.type !== 'MultiPolygon')) {
+                     alert("Por favor, selecciona una parcela válida haciendo clic en ella primero.");
+                     console.warn("selectedLayer no es una parcela válida o no tiene geometría poligonal:", selectedLayer);
                      return;
                  }
-                 try {
-                     // Asegurarse de que turf.area reciba un FeatureCollection o Feature, no solo la geometría
-                      const areaFeature = turf.feature(geometryForCalculations);
-                      if (areaFeature && areaFeature.geometry) {
-                           // turf.area devuelve 0 para geometrías vacías o inválidas también
-                           if (turf.area(areaFeature) === 0) {
-                                alert("El área para generar pasadas es cero.");
-                                return;
-                           }
-                      } else {
-                           console.warn("No se pudo crear un feature válido para calcular el área.");
-                           alert("Error: No se pudo crear un feature válido para el área de pasadas.");
-                           return;
-                      }
-                  } catch(e) { console.error("Error calculando área:", e); return; }
-
-
-                // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A CI Ó N   Y   C U R V A S *** ---
-                // Esta es la parte que DEBES implementar basándote en tus datos cargados.
-                // El algoritmo para generar pasadas que cambian de dirección según la pendiente
-                // y siguen las curvas de nivel es complejo y requiere un diseño específico.
-
-                const generatedPassesFeatures = []; // Array para almacenar los Features (LineString) de las pasadas finales
-
-                // Tienes disponibles:
-                // - `geometryForCalculations`: La geometría (Polygon/MultiPolygon) del área limpia donde generar pasadas.
-                // - `elevationGeoRaster`: El objeto `georaster` del MDT (para obtener elevación).
-                // - `contourLinesGeoJSON`: Los datos GeoJSON de las curvas de nivel (vectoriales).
-                // - `workingWidth`: El ancho de trabajo.
-                // - `slopeThresholdPercent`: El umbral de pendiente.
-                // - `map`: El objeto del mapa Leaflet.
-                // - `turf`: La librería Turf.js cargada.
-                // - `parseGeoRaster`: Debería estar accesible si la carga GeoRaster fue exitosa (verificado en loadGeoTIFFLayer).
-
-                // Concepto del algoritmo (pseudocódigo - rellenar con lógica real):
-                // 1. Determinar una dirección general de inicio para las pasadas (ej. la más larga de la parcela limpia, o un ángulo fijo del input `angleInput.value`).
-                // 2. Generar puntos de partida para las pasadas en esa dirección general, separados por el `workingWidth`, cubriendo el ancho del área limpia.
-                // 3. Para cada punto de partida:
-                //    a. Empezar a trazar la pasada a partir de ese punto.
-                //    b. Muestrear puntos a intervalos cortos (ej. cada 1-2 metros) a lo largo de la pasada.
-                //    c. Para cada punto de muestreo (o segmento entre puntos):
-                //       i. **Obtener la elevación:** Usar `elevationGeoRaster.getValueAt(lng, lat, { planar: true })` con las coordenadas del punto (en WGS84). Ojo: `getValueAt` puede ser asíncrono (devuelve Promise). Necesitarás manejar Promesas si el método es asíncrono.
-                //       ii. **Calcular la pendiente:** Estimar la pendiente en ese punto/segmento. Esto es complejo. Una forma simple es obtener la elevación de puntos vecinos (en el ráster) y calcular la diferencia / distancia. Una forma más avanzada requeriría un análisis de pendiente local sobre el `georaster`.
-                //       iii. **Tomar decisión según la pendiente:**
-                //           - Si la pendiente es MAYOR que `slopeThresholdPercent`:
-                //               - La dirección para el siguiente segmento de la pasada DEBE ser **paralela a la curva de nivel cercana**.
-                //               - Usar `turf.nearestPointOnLine` con el punto actual y el `contourLinesGeoJSON` (el FeatureCollection de líneas) para encontrar el punto más cercano en una curva de nivel Y la curva de nivel misma.
-                //               - Obtener la dirección de la curva de nivel en ese punto (esto es complejo, podría requerir muestrear la curva cercana o usar turf.along/bearing en la curva). La dirección de la curva de nivel es la tangente.
-                //               - La dirección deseada para la pasada es **paralela** a esa tangente (la misma dirección que la curva en ese punto).
-                //               - Generar el siguiente punto de la pasada siguiendo esta dirección **paralela** por la distancia de muestreo.
-                //           - Si la pendiente es MENOR o igual que `slopeThresholdPercent`:
-                //               - Seguir la **dirección general** de barrido inicial para el siguiente segmento.
-                //               - Generar el siguiente punto de la pasada siguiendo la dirección general por la distancia de muestreo.
-                //       iv. Asegurarse de que el punto generado sigue dentro de `geometryForCalculations` (el área limpia) usando `turf.booleanPointInPolygon`. Si sale, terminar el segmento actual.
-                //    d. Conectar los puntos generados para formar los segmentos de pasada y añadirlos a `generatedPassesFeatures`.
-
-                // --- ESTE ES UN EJEMPLO RECTO/BARRIDO SIMPLE QUE DEBES REEMPLAZAR ---
-                // Utiliza `geometryForCalculations` (el área limpia) en lugar de la parcela original.
-                // Esto NO usa los datos de elevación ni las curvas de nivel.
-                 console.log("Generando pasadas rectas simuladas (NO considera elevación/curvas)...");
-                 try {
-                     const areaFeatureForSweep = turf.feature(geometryForCalculations);
-                     const bbox = turf.bbox(areaFeatureForSweep); // Bbox del área limpia
-                     // NOTA: Usar el ancho de trabajo como ángulo (15 grados) es inusual.
-                     // Asumiremos que quieres un ángulo fijo (ej. 0 para horizontal, 90 para vertical, o un input de ángulo separado).
-                     // Si workingWidthInput.value realmente debe ser el ángulo, renombra el input a algo como 'sweepAngleInput'.
-                     // Por ahora, usaré un ángulo fijo (ej. 0 grados - horizontal) o el valor del input si es razonable.
-                     // Si 15 es el ancho, el ángulo de barrido debería ser un input separado.
-                     // Usaré un ángulo de barrido de 0 grados (horizontal) como ejemplo, o podrías añadir un input para el ángulo.
-                      const inputSweepAngle = parseFloat(workingWidthInput.value);
-                      const actualSweepAngle = (!isNaN(inputSweepAngle) && inputSweepAngle >= 0 && inputSweepAngle <= 360) ? inputSweepAngle : 0; // Usar input si es válido, si no 0.
-                       console.log(`Usando ángulo de barrido (simulado): ${actualSweepAngle} grados.`);
-
-
-                     const density = workingWidth; // Densidad es el ancho de trabajo
-
-                     const optionsSweep = { units: units }; // Opciones para Turf (la resolución no aplica a lineIntersect directo)
-                     // Calcular el punto de inicio para la primera línea de barrido
-                     // Queremos que la primera línea esté a una distancia 'density/2' del borde del bbox,
-                     // perpendicular a la dirección del barrido, y que atraviese el bbox.
-                     const bboxCenter = turf.center(areaFeatureForSweep);
-
-                     // Calcular un punto de inicio lejos en la dirección opuesta al barrido,
-                     // y luego moverlo perpendicularmente para que cruce el bbox.
-                     const distanceToCover = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units}) * 1.5; // Distancia segura para cubrir el bbox
-
-                     // Encontrar un punto inicial lejos en la dirección opuesta al ángulo de barrido
-                     let startPoint = turf.destination(bboxCenter, distanceToCover / 2 / 1000, actualSweepAngle + 180, {units: 'kilometers'});
-
-                     // La dirección de movimiento perpendicular a la pasada es el ángulo + 90 grados
-                     const moveDirection = actualSweepAngle + 90;
-
-                     // Crear la primera línea de barrido muy larga
-                      let currentSweepLine = turf.lineString([
-                           turf.destination(startPoint, -distanceToCover / 2 / 1000, actualSweepAngle, {units: 'kilometers'}).geometry.coordinates,
-                           turf.destination(startPoint, distanceToCover / 2 / 1000, actualSweepAngle, {units: 'kilometers'}).geometry.coordinates
-                      ]);
-
-
-                       let safetyCounter = 0;
-                       // Estimar el número de pasadas necesarias
-                       // Usaremos la diagonal del bbox como una cota superior para el ancho perpendicular
-                       const bboxDiagonal = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units});
-                       const totalSweepExtent = bboxDiagonal + density; // Asegurar que cubra la diagonal + margen
-
-                       const maxSweeps = Math.ceil(totalSweepExtent / density) + 5; // Límite de seguridad
-
-                       while(safetyCounter < maxSweeps) {
-
-                           try {
-                                // Intersectar la línea de barrido actual con la geometría del área limpia
-                                // lineIntersect devuelve un FeatureCollection de Puntos
-                                const intersection = turf.lineIntersect(currentSweepLine, areaFeatureForSweep);
-
-                                if (intersection && intersection.features && intersection.features.length > 0) {
-                                    // Los puntos de intersección definen los segmentos de la pasada dentro del área limpia.
-                                    // Asegurarse de que los puntos están ordenados a lo largo de la línea de barrido.
-                                     const points = intersection.features.map(f => f.geometry.coordinates);
-                                     // Ordenar puntos basadas en su distancia desde el inicio de la línea de barrido
-                                     const sweepLineStartTurf = turf.point(currentSweepLine.geometry.coordinates[0]);
-                                     points.sort((a, b) => {
-                                          const distA = turf.distance(sweepLineStartTurf, turf.point(a), {units: units});
-                                          const distB = turf.distance(sweepLineStartTurf, turf.point(b), {units: units});
-                                          return distA - distB;
-                                     });
-
-
-                                    // Crear segmentos uniendo pares de puntos (entrada/salida del polígono)
-                                    // lineIntersect debería devolver pares de puntos si la línea cruza un polígono simple.
-                                    // Si cruza un MultiPolygon o un polígono con agujeros, puede devolver más puntos.
-                                    // La lógica simple de i+=2 funciona para polígonos simples sin agujeros o con agujeros que no son cruzados por la misma línea más de dos veces.
-                                    // Para geometrías complejas, se necesita una lógica más avanzada para emparejar los puntos de entrada/salida.
-                                    // Asumiendo polígonos simples o MultiPolígonos donde cada línea cruza cada parte como máximo dos veces:
-                                    if (points.length % 2 === 0) { // Debe haber un número par de puntos (entrada/salida)
-                                         for (let i = 0; i < points.length - 1; i += 2) {
-                                             const p1 = points[i];
-                                             const p2 = points[i+1];
-                                             try {
-                                                 const segment = turf.lineString([p1, p2]);
-                                                  if (segment && segment.geometry && segment.geometry.type === 'LineString') {
-                                                       // Añadir este segmento como una "pasada" generada
-                                                       generatedPassesFeatures.push(segment);
-                                                  } else {
-                                                       console.warn("Segmento de pasada generado no es LineString válido.", segment);
-                                                  }
-
-                                             } catch(e) {
-                                                   console.error("Error creando segmento de pasada a partir de puntos de intersección:", p1, p2, e);
-                                             }
-
-                                         }
-                                    } else {
-                                         console.warn(`Número impar de puntos de intersección (${points.length}) encontrados en la línea de barrido ${safetyCounter}. No se pueden emparejar correctamente.`);
-                                         // Opcional: intentar añadir los puntos como puntos de la pasada si no se pueden formar líneas
-                                         // generatedPassesFeatures.push(...points.map(p => turf.point(p)));
-                                    }
-
-                                }
-
-                            } catch(e) {
-                                console.error(`Error en turf.lineIntersect para sweep line ${safetyCounter}:`, e);
-                                 // Continuar al siguiente offset incluso si esta intersección falló
-                            }
-
-                            // Mover la línea de barrido al siguiente offset (perpendicular a la pasada)
-                            // Obtener un punto de referencia en la línea actual (ej. el primero)
-                             const refPointCoords = currentSweepLine.geometry.coordinates[0];
-                             // Calcular el nuevo punto de referencia movido
-                             const movedRefPoint = turf.destination(turf.point(refPointCoords), density / 1000, moveDirection, {units: 'kilometers'}); // Mover por el ancho de trabajo
-                            // Calcular el vector de movimiento
-                            const moveVector = [
-                                movedRefPoint.geometry.coordinates[0] - refPointCoords[0],
-                                movedRefPoint.geometry.coordinates[1] - refPointCoords[1]
-                            ];
-
-                             // Mover todos los puntos de la línea actual usando el vector de movimiento
-                             const nextSweepLineCoords = currentSweepLine.geometry.coordinates.map(coord => [
-                                 coord[0] + moveVector[0],
-                                 coord[1] + moveVector[1]
-                             ]);
-                             currentSweepLine = turf.lineString(nextSweepLineCoords);
-
-
-                            // Criterio de salida: si la línea de barrido se ha movido más allá del extremo opuesto del bbox (con un margen)
-                            // Usamos la distancia desde el centro del bbox original hasta el centro de la línea actual
-                             const currentSweepLineCenter = turf.center(currentSweepLine);
-                             const distanceMovedFromBboxCenter = turf.distance(bboxCenter, currentSweepLineCenter, {units: units});
-
-                             if (distanceMovedFromBboxCenter > totalSweepExtent / 2) { // Comparar con la mitad de la extensión total
-                                  console.log("Criterio de salida del bucle de barrido cumplido (centro movido más allá de la mitad de la extensión total).");
-                                  break; // Salir del bucle
-                             }
-
-                             safetyCounter++;
-                             if (safetyCounter >= maxSweeps) {
-                                console.warn(`Se alcanzó el límite máximo de ${maxSweeps} líneas de barrido. El área limpia podría no estar completamente cubierta.`);
-                             }
-
-                       } // Fin bucle while
-
-
-                 } catch (e) {
-                     console.error("Error durante la generación de pasadas rectas simuladas:", e);
-                     alert("Ocurrió un error general en la simulación de pasadas rectas. Revisa la consola.");
+                 // Verificar que los datos clave para la lógica de elevación/curvas están disponibles
+                 // Usamos la existencia de los objetos esperados como verificación
+                if (typeof elevationGeoRaster === 'undefined' || elevationGeoRaster === null) {
+                    alert("Los datos de elevación (MDT) no están disponibles. No se puede generar pasadas sensibles al terreno.");
+                    console.warn("Objeto georaster de elevación no disponible:", elevationGeoRaster);
+                    return;
+                }
+                 if (typeof contourLinesGeoJSON === 'undefined' || contourLinesGeoJSON === null || !contourLinesGeoJSON.features) {
+                     alert("Los datos de curvas de nivel no están disponibles. No se puede generar pasadas sensibles al terreno.");
+                     console.warn("Datos GeoJSON de curvas de nivel no disponibles o vacíos:", contourLinesGeoJSON);
+                     return;
                  }
 
 
-                // --- Añadir las pasadas generadas al mapa ---
-                 const passesFeatureCollection = turf.featureCollection(generatedPassesFeatures);
+                const selectedParcelGeoJSON = selectedLayer.toGeoJSON();
+                let parcelGeometry = selectedParcelGeoJSON.geometry; // Geometría de la parcela seleccionada
+                const parcelFeature = turf.feature(parcelGeometry); // La parcela como feature para intersecciones
 
-                 generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores (ya se hace al inicio del click)
-                 L.geoJSON(passesFeatureCollection, {
-                     style: { color: 'green', weight: 2 }
-                 }).addTo(generatedPassesLayer); // Añadir al featureGroup existente
+                generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores
+                console.log("Limpiando pasadas generadas anteriormente.");
 
-                // El featureGroup (generatedPassesLayer) ya está añadido al mapa y al control de capas.
+                // --- Obtener el ancho de trabajo del input ---
+                const workingWidth = parseFloat(workingWidthInput.value);
+                if (isNaN(workingWidth) || workingWidth <= 0) {
+                     alert("Por favor, introduce un valor válido y positivo para el ancho de trabajo.");
+                     console.error("Valor inválido para ancho de trabajo:", workingWidthInput.value);
+                     return;
+                }
+                // --- Fin Obtener ancho de trabajo ---
 
+                const units = 'meters'; // Unidades para Turf.js
 
-                loadingStatusDiv.textContent = `Pasadas generadas: ${generatedPassesFeatures.length} segmentos.`;
-                console.log("--- Fin Generación de Pasadas ---");
-
-           } catch (e) {
-               console.error("Error general en el evento click de generación de pasadas:", e);
-               alert("Ocurrió un error general al generar las pasadas. Revisa la consola para detalles.");
-           }
-        });
-
-
-        // --- LÓGICA DE SELECCIÓN DE ZONAS A EVITAR (Requiere implementación adicional si quieres seleccionarlas en el mapa) ---
-        // La variable global `window.exclusionFeatures` ya contiene las geometrías de exclusión cargadas
-        // (Construcciones y Elementos Linea con buffer si eran líneas).
-        // Tu lógica en el evento click ya filtra las que intersectan con la parcela seleccionada
-        // y las usa para calcular el área limpia. Puedes usar esa variable.
-        // Si quieres poder SELECCIONAR zonas a evitar manualmente en el mapa, necesitarías:
-        // 1. Hacer las capas de Construcciones y Viales interactivas (onEachFeature con click listeners).
-        // 2. Tener una forma (ej. un botón o modo) para indicar que estás seleccionando zonas a evitar.
-        // 3. Al hacer clic en una feature de Construcción o Vial, añadir su geometría (o su buffer si es LineString)
-        //    a una lista TEMPORAL de "zonas a evitar seleccionadas por el usuario" para la generación de pasadas actual.
-        // 4. Usar esta lista TEMPORAL en la lógica de exclusión dentro del botón de generar pasadas,
-        //    EN LUGAR de (o además de) usar la variable global `window.exclusionFeatures` completa.
-        // 5. Proporcionar alguna retroalimentación visual de las zonas a evitar seleccionadas por el usuario.
-        // Esta implementación es compleja y va más allá del alcance actual. Por ahora, la lógica usa TODAS
-        // las exclusiones cargadas que intersectan la parcela.
+                // *** UMBRAL DE PENDIENTE ***
+                // Define aquí el porcentaje de pendiente a partir del cual el tractor debe seguir las curvas de nivel.
+                const slopeThresholdPercent = 10; // Ejemplo: 10% de pendiente. AJUSTA ESTE VALOR.
+                console.log(`Umbral de pendiente para cambio de lógica: ${slopeThresholdPercent}%`);
 
 
-        // --- LOGS INICIALES ---
-        console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
-        console.log("La carga automática de datos geoespaciales (GeoJSON y ráster/vectoriales de elevación) comenzará al terminar de cargar el DOM.");
+                try {
+                    // --- Lógica para obtener features de exclusión que intersectan con la parcela seleccionada (usando window.exclusionFeatures) ---
+                     let intersectingExclusionFeatures = []; // Array para almacenar las FEATURES de exclusión que INTERSECTAN
+                     const globalExclusionFeatures = window.exclusionFeatures || []; // Acceder a la variable global
+
+                     if (globalExclusionFeatures.length > 0) {
+                         console.log(`Filtrando features de exclusión para encontrar las que intersectan con la parcela seleccionada.`);
+                          globalExclusionFeatures.forEach((exclusionFeature) => {
+                             if (exclusionFeature.geometry && (exclusionFeature.geometry.type === 'Polygon' || exclusionFeature.geometry.type === 'MultiPolygon')) {
+                                  try {
+                                      // booleanIntersects verifica si las geometrías se tocan o se cruzan.
+                                      if (turf.booleanIntersects(parcelFeature, exclusionFeature)) {
+                                         intersectingExclusionFeatures.push(exclusionFeature);
+                                      }
+                                  } catch (e) { console.warn(`Error al verificar intersección para feature de exclusión. Se omitirá.`, exclusionFeature, e); }
+                             }
+                          });
+                     } else { console.log("No hay zonas de exclusión cargadas globalmente."); }
+                     console.log(`Features de exclusión que intersectan con la parcela seleccionada: ${intersectingExclusionFeatures.length}`);
+
+                    // --- Calcular el área limpia (Parcela - Unión de ExclusionFeatures simplificadas que intersectan) ---
+                    let geometryForCalculations = parcelGeometry; // Inicialmente es la parcela completa
+
+                    // TU LÓGICA EXISTENTE PARA CALCULAR `geometryForCalculations`
+                    // A PARTIR DE `parcelGeometry` y `intersectingExclusionFeatures` VA AQUÍ.
+                    // (El código extenso que tenías antes con turf.union, turf.difference, turf.simplify)
+                    // Asegúrate de que, if the exclusion logic runs, `geometryForCalculations`
+                    // se actualice a la geometría del área limpia resultante (Polygon o MultiPolygon).
+                    // Si no hay exclusiones o la lógica falla, `geometryForCalculations` debe seguir siendo la `parcelGeometry`.
+
+                    // EJEMPLO SIMPLIFICADO de cómo aplicar la diferencia si hay exclusiones
+                    if (intersectingExclusionFeatures.length > 0) {
+                         try {
+                             // turf.union puede manejar múltiples polígonos/multipolígonos
+                             // Necesita ser FeatureCollection o un array de Features
+                             const unionFeatureCollection = turf.featureCollection(intersectingExclusionFeatures);
+                             // turf.union puede devolver null si la entrada no es válida para una unión
+                             const unionOfExclusions = unionFeatureCollection.features.length > 0 ? turf.union(...unionFeatureCollection.features) : null;
+
+                             if (unionOfExclusions && unionOfExclusions.geometry) {
+                                 // turf.difference(feature1, feature2) feature1 - feature2
+                                 const cleanedAreaFeature = turf.difference(parcelFeature, unionOfExclusions);
+
+                                 if (cleanedAreaFeature && cleanedAreaFeature.geometry) {
+                                     geometryForCalculations = cleanedAreaFeature.geometry; // Usar la geometría del área limpia
+                                     console.log("Área limpia calculada después de exclusiones.");
+                                      // Opcional: Aplicar una ligera simplificación a la geometría del área limpia si es muy compleja
+                                      // try { geometryForCalculations = turf.simplify(turf.feature(geometryForCalculations), { tolerance: 0.00001, highQuality: true }).geometry; } catch(e) { console.warn("Error simplificando área limpia:", e); }
+                                 } else {
+                                    console.warn("Resultado de turf.difference es nulo o sin geometría. Usando geometría de parcela completa para pasadas.");
+                                     alert("Advertencia: No se pudo calcular el área limpia correctamente. Generando pasadas sobre la parcela completa.");
+                                 }
+                             } else {
+                                 console.warn("Resultado de turf.union de exclusiones es nulo o sin geometría. Usando geometría de parcela completa para pasadas.");
+                                  // alert("Advertencia: No se pudo unir las áreas a evitar correctamente. Generando pasadas sobre la parcela completa."); // Evitar alert repetido
+                             }
+                         } catch (e) {
+                             console.error("Error en lógica de unión/diferencia para exclusiones:", e);
+                              alert("Error al excluir zonas a evitar. Generando pasadas sobre la parcela completa. Revisa consola.");
+                         }
+                     } else {
+                         console.log("No hay zonas a evitar que intersecten. Generando pasadas sobre la parcela completa.");
+                     }
 
 
-    </script>
+                     // VALIDACIONES BÁSICAS del área para pasar
+                     if (!geometryForCalculations || !(geometryForCalculations.type === 'Polygon' || geometryForCalculations.type === 'MultiPolygon')) {
+                         console.error("La geometría final para cálculos no es un Polígono/MultiPolígono válido.");
+                         alert("Error: La geometría resultante para generar pasadas es inválida.");
+                         return;
+                     }
+                     try {
+                         // Asegurarse de que turf.area reciba un FeatureCollection o Feature, no solo la geometría
+                          const areaFeature = turf.feature(geometryForCalculations);
+                          if (areaFeature && areaFeature.geometry) {
+                               // turf.area devuelve 0 para geometrías vacías o inválidas también
+                               if (turf.area(areaFeature) === 0) {
+                                    alert("El área para generar pasadas es cero.");
+                                    return;
+                               }
+                          } else {
+                               console.warn("No se pudo crear un feature válido para calcular el área.");
+                               alert("Error: No se pudo crear un feature válido para el área de pasadas.");
+                               return;
+                          }
+                      } catch(e) { console.error("Error calculando área:", e); return; }
 
-</body>
-</html>
+
+                    // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A CI Ó N   Y   C U R V A S *** ---
+                    // Esta es la parte que DEBES implementar basándote en tus datos cargados.
+                    // El algoritmo para generar pasadas que cambian de dirección según la pendiente
+                    // y siguen las curvas de nivel es complejo y requiere un diseño específico.
+
+                    const generatedPassesFeatures = []; // Array para almacenar los Features (LineString) de las pasadas finales
+
+                    // Tienes disponibles:
+                    // - `geometryForCalculations`: La geometría (Polygon/MultiPolygon) del área limpia donde generar pasadas.
+                    // - `elevationGeoRaster`: El objeto `georaster` del MDT (para obtener elevación).
+                    // - `contourLinesGeoJSON`: Los datos GeoJSON de las curvas de nivel (vectoriales).
+                    // - `workingWidth`: El ancho de trabajo.
+                    // - `slopeThresholdPercent`: El umbral de pendiente.
+                    // - `map`: El objeto del mapa Leaflet.
+                    // - `turf`: La librería Turf.js cargada.
+                    // - `parseGeoRaster`: Debería estar accesible si la carga GeoRaster fue exitosa (verificado en loadGeoTIFFLayer).
+
+                    // Concepto del algoritmo (pseudocódigo - rellenar con lógica real):
+                    // 1. Determinar una dirección general de inicio para las pasadas (ej. la más larga de la parcela limpia, o un ángulo fijo del input `angleInput.value`).
+                    // 2. Generar puntos de partida para las pasadas en esa dirección general, separados por el `workingWidth`, cubriendo el ancho del área limpia.
+                    // 3. Para cada punto de partida:
+                    //    a. Empezar a trazar la pasada a partir de ese punto.
+                    //    b. Muestrear puntos a intervalos cortos (ej. cada 1-2 metros) a lo largo de la pasada.
+                    //    c. Para cada punto de muestreo (o segmento entre puntos):
+                    //       i. **Obtener la elevación:** Usar `elevationGeoRaster.getValueAt(lng, lat, { planar: true })` con las coordenadas del punto (en WGS84). Ojo: `getValueAt` puede ser asíncrono (devuelve Promise). Necesitarás manejar Promesas si el método es asíncrono.
+                    //       ii. **Calcular la pendiente:** Estimar la pendiente en ese punto/segmento. Esto es complejo. Una forma simple es obtener la elevación de puntos vecinos (en el ráster) y calcular la diferencia / distancia. Una forma más avanzada requeriría un análisis de pendiente local sobre el `georaster`.
+                    //       iii. **Tomar decisión según la pendiente:**
+                    //           - Si la pendiente es MAYOR que `slopeThresholdPercent`:
+                    //               - La dirección para el siguiente segmento de la pasada DEBE ser **paralela a la curva de nivel cercana**.
+                    //               - Usar `turf.nearestPointOnLine` con el punto actual y el `contourLinesGeoJSON` (el FeatureCollection de líneas) para encontrar el punto más cercano en una curva de nivel Y la curva de nivel misma.
+                               //               - Obtener la dirección de la curva de nivel en ese punto (esto es complejo, podría requerir muestrear la curva cercana o usar turf.along/bearing en la curva). La dirección de la curva de nivel es la tangente.
+                               //               - La dirección deseada para la pasada es **paralela** a esa tangente (la misma dirección que la curva en ese punto).
+                               //               - Generar el siguiente punto de la pasada siguiendo esta dirección **paralela** por la distancia de muestreo.
+                               //           - Si la pendiente es MENOR o igual que `slopeThresholdPercent`:
+                               //               - Seguir la **dirección general** de barrido inicial para el siguiente segmento.
+                               //               - Generar el siguiente punto de la pasada siguiendo la dirección general por la distancia de muestreo.
+                               //       iv. Asegurarse de que el punto generado sigue dentro de `geometryForCalculations` (el área limpia) usando `turf.booleanPointInPolygon`. Si sale, terminar el segmento actual.
+                               //    d. Conectar los puntos generados para formar los segmentos de pasada y añadirlos a `generatedPassesFeatures`.
+
+                               // --- ESTE ES UN EJEMPLO RECTO/BARRIDO SIMPLE QUE DEBES REEMPLAZAR ---
+                               // Utiliza `geometryForCalculations` (el área limpia) en lugar de la parcela original.
+                               // Esto NO usa los datos de elevación ni las curvas de nivel.
+                                console.log("Generando pasadas rectas simuladas (NO considera elevación/curvas)...");
+                                try {
+                                    const areaFeatureForSweep = turf.feature(geometryForCalculations);
+                                    const bbox = turf.bbox(areaFeatureForSweep); // Bbox del área limpia
+                                    // NOTA: Usar el ancho de trabajo como ángulo (15 grados) es inusual.
+                                    // Asumiremos que quieres un ángulo fijo (ej. 0 para horizontal, 90 para vertical, o un input de ángulo separado).
+                                    // Si workingWidthInput.value realmente debe ser el ángulo, renombra el input a algo como 'sweepAngleInput'.
+                                    // Por ahora, usaré un ángulo fijo (ej. 0 grados - horizontal) o el valor del input si es razonable.
+                                    // Si 15 es el ancho, el ángulo de barrido debería ser un input separado.
+                                    // Usaré un ángulo de barrido de 0 grados (horizontal) como ejemplo, o podrías añadir un input para el ángulo.
+                                     const inputSweepAngle = parseFloat(workingWidthInput.value);
+                                     const actualSweepAngle = (!isNaN(inputSweepAngle) && inputSweepAngle >= 0 && inputSweepAngle <= 360) ? inputSweepAngle : 0; // Usar input si es válido, si no 0.
+                                      console.log(`Usando ángulo de barrido (simulado): ${actualSweepAngle} grados.`);
+
+
+                                    const density = workingWidth; // Densidad es el ancho de trabajo
+
+                                    const optionsSweep = { units: units }; // Opciones para Turf (la resolución no aplica a lineIntersect directo)
+                                    // Calcular el punto de inicio para la primera línea de barrido
+                                    // Queremos que la primera línea esté a una distancia 'density/2' del borde del bbox,
+                                    // perpendicular a la dirección del barrido, y que atraviese el bbox.
+                                    const bboxCenter = turf.center(areaFeatureForSweep);
+
+                                    // Calcular un punto de inicio lejos en la dirección opuesta al barrido,
+                                    // y luego moverlo perpendicularmente para que cruce el bbox.
+                                    const distanceToCover = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units}) * 1.5; // Distancia segura para cubrir el bbox
+
+                                    // Encontrar un punto inicial lejos en la dirección opuesta al ángulo de barrido
+                                    let startPoint = turf.destination(bboxCenter, distanceToCover / 2 / 1000, actualSweepAngle + 180, {units: 'kilometers'});
+
+                                    // La dirección de movimiento perpendicular a la pasada es el ángulo + 90 grados
+                                    const moveDirection = actualSweepAngle + 90;
+
+                                    // Crear la primera línea de barrido muy larga
+                                     let currentSweepLine = turf.lineString([
+                                          turf.destination(startPoint, -distanceToCover / 2 / 1000, actualSweepAngle, {units: 'kilometers'}).geometry.coordinates,
+                                          turf.destination(startPoint, distanceToCover / 2 / 1000, actualSweepAngle, {units: 'kilometers'}).geometry.coordinates
+                                     ]);
+
+
+                                     let safetyCounter = 0;
+                                     // Estimar el número de pasadas necesarias
+                                     // Usaremos la diagonal del bbox como una cota superior para el ancho perpendicular
+                                     const bboxDiagonal = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units});
+                                     const totalSweepExtent = bboxDiagonal + density; // Asegurar que cubra la diagonal + margen
+
+                                     const maxSweeps = Math.ceil(totalSweepExtent / density) + 5; // Límite de seguridad
+
+                                     while(safetyCounter < maxSweeps) {
+
+                                         try {
+                                              // Intersectar la línea de barrido actual con la geometría del área limpia
+                                              // lineIntersect devuelve un FeatureCollection de Puntos
+                                              const intersection = turf.lineIntersect(currentSweepLine, areaFeatureForSweep);
+
+                                              if (intersection && intersection.features && intersection.features.length > 0) {
+                                                  // Los puntos de intersección definen los segmentos de la pasada dentro del área limpia.
+                                                  // Asegurarse de que los puntos están ordenados a lo largo de la línea de barrido.
+                                                   const points = intersection.features.map(f => f.geometry.coordinates);
+                                                   // Ordenar puntos basadas en su distancia desde el inicio de la línea de barrido
+                                                   const sweepLineStartTurf = turf.point(currentSweepLine.geometry.coordinates[0]);
+                                                   points.sort((a, b) => {
+                                                        const distA = turf.distance(sweepLineStartTurf, turf.point(a), {units: units});
+                                                        const distB = turf.distance(sweepLineStartTurf, turf.point(b), {units: units});
+                                                        return distA - distB;
+                                                   });
+
+
+                                                  // Crear segmentos uniendo pares de puntos (entrada/salida del polígono)
+                                                  // lineIntersect debería devolver pares de puntos si la línea cruza un polígono simple.
+                                                  // Si cruza un MultiPolygon o un polígono con agujeros, puede devolver más puntos.
+                                                  // La lógica simple de i+=2 funciona para polígonos simples sin agujeros o con agujeros que no son cruzados por la misma línea más de dos veces.
+                                                  // Para geometrías complejas, se necesita una lógica más avanzada para emparejar los puntos de entrada/salida.
+                                                  // Asumiendo polígonos simples o MultiPolígonos donde cada línea cruza cada parte como máximo dos veces:
+                                                  if (points.length % 2 === 0) { // Debe haber un número par de puntos (entrada/salida)
+                                                       for (let i = 0; i < points.length - 1; i += 2) {
+                                                           const p1 = points[i];
+                                                           const p2 = points[i+1];
+                                                           try {
+                                                               const segment = turf.lineString([p1, p2]);
+                                                                if (segment && segment.geometry && segment.geometry.type === 'LineString') {
+                                                                     // Añadir este segmento como una "pasada" generada
+                                                                     generatedPassesFeatures.push(segment);
+                                                                } else {
+                                                                     console.warn("Segmento de pasada generado no es LineString válido.", segment);
+                                                                }
+
+                                                           } catch(e) {
+                                                                 console.error("Error creando segmento de pasada a partir de puntos de intersección:", p1, p2, e);
+                                                           }
+
+                                                       }
+                                                  } else {
+                                                       console.warn(`Número impar de puntos de intersección (${points.length}) encontrados en la línea de barrido ${safetyCounter}. No se pueden emparejar correctamente.`);
+                                                       // Opcional: intentar añadir los puntos como puntos de la pasada si no se pueden formar líneas
+                                                       // generatedPassesFeatures.push(...points.map(p => turf.point(p)));
+                                                  }
+
+                                              }
+
+                                          } catch(e) {
+                                              console.error(`Error en turf.lineIntersect para sweep line ${safetyCounter}:`, e);
+                                               // Continuar al siguiente offset incluso si esta intersección falló
+                                          }
+
+                                          // Mover la línea de barrido al siguiente offset (perpendicular a la pasada)
+                                          // Obtener un punto de referencia en la línea actual (ej. el primero)
+                                           const refPointCoords = currentSweepLine.geometry.coordinates[0];
+                                           // Calcular el nuevo punto de referencia movido
+                                           const movedRefPoint = turf.destination(turf.point(refPointCoords), density / 1000, moveDirection, {units: 'kilometers'}); // Mover por el ancho de trabajo
+                                          // Calcular el vector de movimiento
+                                          const moveVector = [
+                                              movedRefPoint.geometry.coordinates[0] - refPointCoords[0],
+                                              movedRefPoint.geometry.coordinates[1] - refPointCoords[1]
+                                          ];
+
+                                           // Mover todos los puntos de la línea actual usando el vector de movimiento
+                                           const nextSweepLineCoords = currentSweepLine.geometry.coordinates.map(coord => [
+                                               coord[0] + moveVector[0],
+                                               coord[1] + moveVector[1]
+                                           ]);
+                                           currentSweepLine = turf.lineString(nextSweepLineCoords);
+
+
+                                          // Criterio de salida: si la línea de barrido se ha movido más allá del extremo opuesto del bbox (con un margen)
+                                          // Usamos la distancia desde el centro del bbox original hasta el centro de la línea actual
+                                           const currentSweepLineCenter = turf.center(currentSweepLine);
+                                           const distanceMovedFromBboxCenter = turf.distance(bboxCenter, currentSweepLineCenter, {units: units});
+
+                                           if (distanceMovedFromBboxCenter > totalSweepExtent / 2) { // Comparar con la mitad de la extensión total
+                                                console.log("Criterio de salida del bucle de barrido cumplido (centro movido más allá de la mitad de la extensión total).");
+                                                break; // Salir del bucle
+                                           }
+
+                                           safetyCounter++;
+                                           if (safetyCounter >= maxSweeps) {
+                                              console.warn(`Se alcanzó el límite máximo de ${maxSweeps} líneas de barrido. El área limpia podría no estar completamente cubierta.`);
+                                           }
+
+                                     } // Fin bucle while
+
+
+                               } catch (e) {
+                                   console.error("Error durante la generación de pasadas rectas simuladas:", e);
+                                   alert("Ocurrió un error general en la simulación de pasadas rectas. Revisa la consola.");
+                               }
+
+
+                              // --- Añadir las pasadas generadas al mapa ---
+                               const passesFeatureCollection = turf.featureCollection(generatedPassesFeatures);
+
+                               generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores (ya se hace al inicio del click)
+                               L.geoJSON(passesFeatureCollection, {
+                                   style: { color: 'green', weight: 2 }
+                               }).addTo(generatedPassesLayer); // Añadir al featureGroup existente
+
+                              // El featureGroup (generatedPassesLayer) ya está añadido al mapa y al control de capas.
+
+
+                              loadingStatusDiv.textContent = `Pasadas generadas: ${generatedPassesFeatures.length} segmentos.`;
+                              console.log("--- Fin Generación de Pasadas ---");
+
+                         } catch (e) {
+                             console.error("Error general en el evento click de generación de pasadas:", e);
+                             alert("Ocurrió un error general al generar las pasadas. Revisa la consola para detalles.");
+                         }
+                      });
+
+
+                      // --- LÓGICA DE SELECCIÓN DE ZONAS A EVITAR (Requiere implementación adicional si quieres seleccionarlas en el mapa) ---
+                      // La variable global `window.exclusionFeatures` ya contiene las geometrías de exclusión cargadas
+                      // (Construcciones y Elementos Linea con buffer si eran líneas).
+                      // Tu lógica en el evento click ya filtra las que intersectan con la parcela seleccionada
+                      // y las usa para calcular el área limpia. Puedes usar esa variable.
+                      // Si quieres poder SELECCIONAR zonas a evitar manualmente en el mapa, necesitarías:
+                      // 1. Hacer las capas de Construcciones y Viales interactivas (onEachFeature con click listeners).
+                      // 2. Tener una forma (ej. un botón o modo) para indicar que estás seleccionando zonas a evitar.
+                      // 3. Al hacer clic en una feature de Construcción o Vial, añadir su geometría (o su buffer si es LineString)
+                      //    a una lista TEMPORAL de "zonas a evitar seleccionadas por el usuario" para la generación de pasadas actual.
+                      // 4. Usar esta lista TEMPORAL en la lógica de exclusión dentro del botón de generar pasadas,
+                      //    EN LUGAR de (o además de) usar la variable global `window.exclusionFeatures` completa.
+                      // 5. Proporcionar alguna retroalimentación visual de las zonas a evitar seleccionadas por el usuario.
+                      // Esta implementación es compleja y va más allá del alcance actual. Por ahora, la lógica usa TODAS
+                      // las exclusiones cargadas que intersectan la parcela.
+
+
+                      // --- LOGS INICIALES ---
+                      console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
+                      console.log("La carga automática de datos geoespaciales (GeoJSON y ráster/vectoriales de elevación) comenzará al terminar de cargar el DOM.");
+
+
+                  }); // End DOMContentLoaded
+
+              </script>
+
+          </body>
+          </html>
