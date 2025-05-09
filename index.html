@@ -25,7 +25,8 @@
             text-align: center;
             margin-bottom: 10px;
         }
-        .control-container label, .control-container input, .control-container button, .control-container select {
+        /* Eliminamos los estilos específicos para select si ya no hay selectores */
+        .control-container label, .control-container input, .control-container button {
             display: inline-block;
             margin: 5px;
             padding: 10px 20px;
@@ -56,17 +57,6 @@
 <body>
 
     <div class="control-container">
-        <label for="parcel-select">Seleccionar Parcela:</label>
-        <select id="parcel-select" name="parcel_select">
-           <option value="">-- Seleccionar --</option>
-           </select>
-
-         <label for="avoid-select">Seleccionar Zona a Evitar:</label>
-        <select id="avoid-select" name="avoid_select">
-            <option value="">-- Seleccionar --</option>
-            </select>
-
-
         <label for="workingWidth">Ancho de Trabajo (m):</label>
         <input type="number" id="workingWidth" value="15" min="1">
         <button id="generarPasadasBtn" disabled>Generar Pasadas (Cargando Datos...)</button>
@@ -386,7 +376,7 @@
 
                 // Usar Promise.all para cargar todos los archivos concurrentemente
                 Promise.all([
-                    loadGeoJSONLayer(parcelasGeojsonDataUrl, 'Mis Parcelas', { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }, { // Añadir opciones para loadGeoJSONLayer
+                    loadGeoJSONLayer(parcelasGeojsonDataUrl, 'Mis Parcelas', { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }, { // Añadir opciones para loadGeoJSONLayer con onEachFeature
                          onEachFeature: (feature, layer) => { // Lógica onEachFeature para la selección de parcela al hacer clic
                              const defaultStyle = { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
                              originalStyle[layer._leaflet_id] = defaultStyle; // Guardar el estilo por defecto
@@ -411,9 +401,12 @@
                                           if (!(feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
                                                console.warn("La feature seleccionada no es poligonal. Botón de generar pasadas deshabilitado.");
                                           }
-                                           if (!elevationGeoRaster || !contourLinesGeoJSON) {
-                                               console.warn("Faltan datos de elevación o curvas de nivel. Botón de generar pasadas deshabilitado.");
+                                           if (elevationGeoRaster === null) { // Usar null check explícito
+                                               console.warn("Faltan datos de elevación. Botón de generar pasadas deshabilitado.");
                                            }
+                                            if (contourLinesGeoJSON === null || !contourLinesGeoJSON.features) { // Usar null/features check explícito
+                                                console.warn("Faltan datos de curvas de nivel. Botón de generar pasadas deshabilitado.");
+                                            }
                                      }
 
 
@@ -428,8 +421,7 @@
                                      L.DomEvent.stopPropagation(e);
                                  }
                              });
-                              // Guardar el estilo por defecto inicial también para las opciones del selector
-                              // Esto duplica un poco la lógica pero asegura que el estilo por defecto esté disponible al deseleccionar vía selector
+                              // Guardar el estilo por defecto inicial para las opciones del selector (aunque no haya selector, la lógica lo usa al deseleccionar)
                              if (!originalStyle[layer._leaflet_id]) {
                                   originalStyle[layer._leaflet_id] = { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
                              }
@@ -468,12 +460,29 @@
                                  parcelasLayer = result.layer;
                                  parcelasGeoJSON = result.data;
                                  if (parcelasGeoJSON && parcelasGeoJSON.features) {
-                                     populateSelect('parcel-select', parcelasGeoJSON, 'CODIGO'); // Poblar el selector de parcela
+                                     // populateSelect('parcel-select', parcelasGeoJSON, 'CODIGO'); // Eliminamos el populateSelect
                                       // Añadir la capa de Parcelas al mapa
                                      if (parcelasLayer) {
                                           parcelasLayer.addTo(map);
                                            overlayLayers["Mis Parcelas"] = parcelasLayer;
-                                      } else { console.warn("La capa de Parcelas no se pudo crear."); } // Ya se marcó el error general arriba
+                                           // Asegurarse de que el estilo original se guarda para cada capa de parcela
+                                            if (parcelasGeoJSON.features) {
+                                                parcelasGeoJSON.features.forEach((feature, index) => {
+                                                     // Find the corresponding Leaflet layer by its feature reference or properties if needed
+                                                    parcelasLayer.eachLayer(layer => {
+                                                        if (layer.feature === feature) {
+                                                            // Guarda el estilo inicial por defecto si aún no se ha guardado (la lógica click lo haría)
+                                                            if (!originalStyle[layer._leaflet_id]) {
+                                                                 originalStyle[layer._leaflet_id] = { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
+                                                                 console.log(`Guardado estilo por defecto para parcela ${feature.properties.CODIGO}`);
+                                                             }
+                                                        }
+                                                    });
+                                                });
+                                            }
+
+
+                                      } else { console.warn("La capa de Parcelas no se pudo crear."); allKeyDataLoadedSuccessfully = false; } // Ya se marcó el error general arriba
                                  } else { allKeyDataLoadedSuccessfully = false; console.error("Datos de Parcelas nulos o sin features."); } // Ya se marcó el error general arriba
                              } else if (result.name === 'Construcciones') {
                                   construccionesLayer = result.layer;
@@ -571,20 +580,20 @@
                           map.setView([36.7462, -5.1612], 14); // Fallback
                     }
 
-                     // Habilitar el botón si todos los datos CLAVE cargaron sin errores reportados en Promise.all
-                     // Los datos clave son: Parcelas (geoJSON), Elevación (georaster), Curvas de Nivel (geoJSON)
-                     // El botón se habilita al seleccionar una parcela VÁLIDA, pero solo si estos datos clave existen.
-                     if (allKeyDataLoadedSuccessfully && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
-                         loadingStatusDiv.textContent = 'Datos cargados. Selecciona una parcela.';
-                          // El botón generarPasadasBtn.disabled se controla en el evento 'change' del selector de parcelas
-                         console.log("Carga automática de datos clave finalizada con éxito.");
+                     // El botón generarPasadasBtn.disabled se controla en el evento 'click' de la capa de parcelas
+                     // si los datos clave (GeoJSON de parcelas, elevationGeoRaster, contourLinesGeoJSON) se cargaron con éxito.
+                    if (allKeyDataLoadedSuccessfully && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
+                         loadingStatusDiv.textContent = 'Datos cargados. Haz clic en una parcela.';
+                         console.log("Carga automática de datos clave finalizada con éxito. Esperando clic en parcela.");
                      } else {
-                          loadingStatusDiv.textContent = 'Carga de datos completada con errores.';
-                          console.error("La carga automática de datos finalizó con datos clave faltantes. El botón de generar pasadas se habilitará si se selecciona una parcela Y los datos faltantes se resuelven.");
+                          loadingStatusDiv.textContent = 'Carga de datos completada con errores. No se pueden generar pasadas.';
+                          console.error("La carga automática de datos finalizó con datos clave faltantes. El botón de generar pasadas permanecerá deshabilitado.");
                            // Alertar si faltan datos clave
-                           if (!parcelasGeoJSON) alert("Error: No se pudieron cargar los datos de Parcelas.");
-                           if (!elevationGeoRaster) alert("Error: No se pudieron cargar los datos de Elevación (MDT).");
-                           if (!contourLinesGeoJSON) alert("Error: No se pudieron cargar los datos de Curvas de Nivel.");
+                           if (!parcelasGeoJSON) console.error("Error: No se pudieron cargar los datos de Parcelas."); // Solo log si ya se intentó cargar
+                           if (elevationGeoRaster === null) console.error("Error: No se pudieron cargar los datos de Elevación (MDT)."); // Solo log si ya se intentó cargar
+                           if (contourLinesGeoJSON === null || !contourLinesGeoJSON.features) console.error("Error: No se pudieron cargar los datos de Curvas de Nivel."); // Solo log si ya se intentó cargar
+
+                          alert("Error: No se pudieron cargar todos los datos necesarios (Parcelas, Elevación o Curvas de Nivel). Revisa la consola para detalles. No se pueden generar pasadas.");
                      }
 
 
@@ -599,93 +608,9 @@
             });
 
 
-            // Función para poblar un selector (select) con opciones de un FeatureCollection
-            function populateSelect(selectId, featureCollection, propertyName) {
-                const selectElement = document.getElementById(selectId);
-                if (!selectElement || !featureCollection || !featureCollection.features) {
-                    console.warn(`No se pudo poblar el selector ${selectId}.`);
-                    return;
-                }
-
-                // Limpiar opciones existentes (excepto la primera, si es una opción por defecto)
-                selectElement.innerHTML = '<option value="">-- Seleccionar --</option>';
-
-                featureCollection.features.forEach(feature => {
-                    if (feature.properties && feature.properties[propertyName]) {
-                        const option = document.createElement('option');
-                        option.value = feature.properties[propertyName]; // Usar el código como valor
-                        option.textContent = feature.properties[propertyName]; // Mostrar el código como texto
-                        // También puedes mostrar otros atributos si son relevantes
-                        // option.textContent = `Código: ${feature.properties[propertyName]} - Tipo: ${feature.properties.TIPO || 'N/D'}`;
-                        selectElement.appendChild(option);
-                    }
-                });
-                 console.log(`Selector '${selectId}' poblado con ${featureCollection.features.length} opciones.`);
-            }
-
-            // Manejar la selección de parcela (combinando selector y click en mapa)
-            const parcelSelect = document.getElementById('parcel-select');
-            // Asegúrate de que el select de parcela existe en tu HTML. Se ha añadido en el código modificado.
-            if (parcelSelect) {
-                parcelSelect.addEventListener('change', (event) => {
-                    const selectedCode = event.target.value;
-
-                    // Limpiar selección anterior y estilo
-                    if (selectedLayer) {
-                        // Restaurar estilo original o un estilo por defecto si no se guardó
-                        const styleToRestore = originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                        selectedLayer.setStyle(styleToRestore);
-                    }
-                    selectedLayer = null; // Limpiar la referencia a la capa Leaflet seleccionada
-
-                    generarPasadasBtn.disabled = true; // Deshabilitar botón hasta seleccionar una válida
-
-                    if (selectedCode && parcelasGeoJSON && parcelasGeoJSON.features && parcelasLayer) { // Asegurarse de que parcelasLayer existe
-                         const featureFound = parcelasGeoJSON.features.find(feature => feature.properties && feature.properties.CODIGO === selectedCode);
-
-                        if (featureFound) {
-                             parcelasLayer.eachLayer(layer => { // Iterar sobre las capas Leaflet
-                                  if (layer.feature && layer.feature.properties && layer.feature.properties.CODIGO === selectedCode) {
-                                        layer.fire('click', { originalEvent: event }); // Simular un clic en la capa Leaflet para activar la lógica onEachFeature
-                                        console.log(`Selector: Simulando click en capa para parcela con código ${selectedCode}.`);
-                                  } else {
-                                       // Asegurarse de que las otras parcelas tengan su estilo original si se deseleccionan vía selector
-                                       const styleToRestore = originalStyle[layer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                                       layer.setStyle(styleToRestore);
-                                  }
-                             });
-
-                        } else {
-                            console.warn("No se encontró la parcela con el código:", selectedCode, "en los datos cargados al seleccionar desde el selector.");
-                            // alert("No se encontró la parcela seleccionada en los datos cargados."); // Evitar alert
-                        }
-                    } else {
-                         // Si se selecciona "-- Seleccionar --" o falta algún dato
-                         console.log("Selector: Se deseleccionó la parcela o faltan datos de parcelas. Botón deshabilitado.");
-                         // Si se deselecciona "-- Seleccionar --", asegúrate de restaurar el estilo de la capa previamente seleccionada
-                          if (selectedLayer) {
-                              const styleToRestore = originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                              selectedLayer.setStyle(styleToRestore);
-                          }
-                         selectedLayer = null; // Limpiar la referencia
-                    }
-                });
-                 // Añadir name attributes para validación HTML
-                 parcelSelect.setAttribute('name', 'parcel_select');
-            } else {
-                 console.error("Elemento 'parcel-select' no encontrado en el DOM. Asegúrate de que está en tu HTML.");
-            }
-
-             // Añadir name attribute a avoid-select si existe para validación HTML
-            const avoidSelect = document.getElementById('avoid-select');
-             if (avoidSelect) {
-                  avoidSelect.setAttribute('name', 'avoid_select');
-             }
-
-
-            // La lógica para manejar clics en las parcelas en el mapa ya está dentro de onEachFeature
-            // en la carga de la capa de parcelas. Esa lógica maneja la selección visual,
-            // guarda la referencia selectedLayer y habilita el botón "Generar Pasadas".
+             // Eliminamos la función populateSelect y el manejo del evento 'change' del selector,
+             // volviendo a la selección de parcela por clic en el mapa, como en tu código "bueno".
+             // La lógica onEachFeature para el click ya está incluida en la carga de la capa de parcelas.
 
 
             // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS Y DATOS DE ELEVACIÓN/CURVAS ---
@@ -817,7 +742,7 @@
 
                                                } else {
                                                     console.warn(`Simplificación mínima: turf.simplify devolvió tipo de geometría inesperado (${simplified.geometry.type}). Se omitirá para la diferencia.`, simplified);
-                                                    // Podrías intentar procesar GeometryCollection aquí, pero complica la lógica
+                                                    // Podrías intentar procesar GeometryCollection aquí si es necesario, pero complica la lógica
                                                     return null;
                                                }
                                           } else {
@@ -1429,6 +1354,7 @@
                                  safetyCounter++;
                                  continue; // Ir a la siguiente pasada
                             }
+
 
                            // Determinar las coordenadas de inicio y fin de la línea de barrido completa en el espacio rotado para este offset.
                            // Esta línea atraviesa todo el bbox rotado en la dirección de la pasada.
