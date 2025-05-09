@@ -261,6 +261,7 @@
                       let parseFn = undefined;
 
                       // Un paquete global debería exponer parseGeoRaster globalmente o bajo window.GeoRaster
+                      // También verificamos window.georaster y si GeoRasterLayer tiene el método, por robustez.
                       if (typeof parseGeoRaster !== 'undefined') { // Ámbito global
                            parseFn = parseGeoRaster;
                            console.log("parseFn encontrado en ámbito global.");
@@ -268,15 +269,24 @@
                            // Bajo window.GeoRaster (nombre común)
                            parseFn = window.GeoRaster.parseGeoRaster;
                            console.log("parseFn encontrado bajo window.GeoRaster.");
-                      }
-                       // Note: Otros paquetes podrían usar window.georaster o .default, pero .global.min.js suele usar window.GeoRaster.
-                       // Si sigue dando error de parseFn no definido, podríamos añadir más comprobaciones o considerar un problema de compatibilidad.
+                      } else if (typeof window.georaster !== 'undefined' && typeof window.georaster.parseGeoRaster === 'function') {
+                           // Bajo window.georaster (nombre común en minúsculas)
+                           parseFn = window.georaster.parseGeoRaster;
+                           console.log("parseFn encontrado bajo window.georaster.");
+                      } else if (typeof window.GeoRasterLayer !== 'undefined' && typeof window.GeoRasterLayer.parseGeoRaster === 'function') {
+                           // A veces, la función de parseo está adjunta al constructor de la capa
+                           parseFn = window.GeoRasterLayer.parseGeoRaster;
+                           console.log("parseFn encontrado bajo window.GeoRasterLayer.");
+                       }
+
 
                      if (typeof parseFn === 'undefined') {
                           // Si no se encuentra
                            console.error("parseGeoRaster (o similar) no definido en las ubicaciones esperadas.");
                            console.log("Contenido de window.GeoRaster para depuración:", typeof window.GeoRaster !== 'undefined' ? window.GeoRaster : 'undefined');
+                           console.log("Contenido de window.georaster para depuración:", typeof window.georaster !== 'undefined' ? window.georaster : 'undefined');
                            console.log("Contenido de window.GeoRasterLayer para depuración:", typeof window.GeoRasterLayer !== 'undefined' ? window.GeoRasterLayer : 'undefined');
+
 
                            const error = new Error("Librería GeoRaster no cargada correctamente o parseFn no encontrado.");
                            loadingStatusDiv.textContent = `Error cargando ${layerName}: parseFn no encontrado.`;
