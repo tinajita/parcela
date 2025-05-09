@@ -8,13 +8,25 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
 
+    <!-- !!! IMPORTANTE: ORDEN DE CARGA DE SCRIPTS - CADA UNO EN SU LINEA !!! -->
+    <!-- 1. Leaflet (CSS ya arriba) -->
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 
+    <!-- 2. Librerías GEO que dependen de Leaflet y entre sí -->
+    <!-- proj4js debe cargarse antes de georaster si georaster lo necesita para proyecciones -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
-    <script src="https://unpkg.com/georaster@4.0.0/dist/georaster.global.min.js"></script>
+    <!-- georaster debe cargarse ANTES que georaster-layer-for-leaflet -->
+    <!-- CORREGIDO: Intentando con el .min.js de GeoRaster v1.6.0 en unpkg -->
+    <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.min.js"></script>
+    <!-- georaster-layer-for-leaflet debe cargarse DESPUÉS de Leaflet y georaster -->
+    <!-- CORREGIDO: Volviendo a la versión 3.8.0 según feedback del usuario -->
     <script src="https://unpkg.com/georaster-layer-for-leaflet@3.8.0/dist/georaster-layer-for-leaflet.min.js"></script>
 
+    <!-- 3. Librerías generales como Turf.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+    <!-- !!! FIN ORDEN DE CARGA DE SCRIPTS !!! -->
+
+
     <style>
         #map {
             height: 500px;
@@ -63,15 +75,19 @@
 <body>
 
     <div class="control-container">
+        <!-- Añadidos selectores de parcela y zona a evitar -->
         <label for="parcel-select">Seleccionar Parcela:</label>
         <select id="parcel-select">
            <option value="">-- Seleccionar --</option>
-           </select>
+           <!-- Opciones cargadas por JavaScript -->
+        </select>
 
-         <label for="avoid-select">Seleccionar Zona a Evitar:</label>
+         <!-- El selector de zona a evitar no estaba funcional en el original, lo mantengo como placeholder si lo necesitas -->
+        <label for="avoid-select">Seleccionar Zona a Evitar:</label>
         <select id="avoid-select">
             <option value="">-- Seleccionar --</option>
-            </select>
+            <!-- Opciones cargadas por JavaScript si implementas esa lógica -->
+        </select>
 
 
         <label for="workingWidth">Ancho de Trabajo (m):</label>
@@ -85,7 +101,29 @@
         <div id="map"></div>
     </div>
 
+    <!-- Tu script principal DEBE ir DESPUÉS de cargar TODAS las librerías de las que depende -->
+    <!-- Añadido atributo 'defer' para asegurar ejecución después del DOM y librerías -->
     <script defer>
+        // Define updateLayersControl function here, OUTSIDE of DOMContentLoaded listener.
+        // This helps ensure it is defined in the correct scope when called from the Promise.all.
+        let layersControl = null; // Define a nivel de script para que updateLayersControl pueda acceder
+        const baseLayers = {}; // Definir aquí para que updateLayersControl y el Promise.all puedan acceder
+        const overlayLayers = {}; // Definir aquí para que updateLayersControl y el Promise.all puedan acceder
+
+        function updateLayersControl() {
+             // Inicializa el control de capas si aún no existe
+             if (!layersControl) {
+                  layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
+                  console.log("Layers control inicializado.");
+             } else {
+                 // Si ya existe, actualiza las capas en el control existente
+                 map.removeControl(layersControl);
+                 layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
+                 console.log("Layers control actualizado.");
+             }
+        }
+
+
         // NOTA: Estos console.log ahora se ejecutarán cuando el script principal se ejecute,
         // que es después de que el DOM esté cargado y las librerías (si se cargaron sin errores)
         // deberían estar disponibles. El mensaje "inmediatamente después del script tag"
@@ -139,7 +177,7 @@
 
         // --- Capas base ---
         // Capa Minimalista (Se mantiene)
-        const minimalBaseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+        baseLayers["Fondo Claro Minimalista"] = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
             subdomains: 'abcd',
             maxZoom: 19
@@ -159,12 +197,12 @@
            });
 
         // Capa Híbrida (Satélite + Etiquetas) (Se mantiene)
-         const hybridEsriLayer = L.layerGroup([satelliteLayer, esriOverlayLabels]);
+         baseLayers["Híbrido Satélite+Etiquetas (Esri)"] = L.layerGroup([satelliteLayer, esriOverlayLabels]);
 
 
         // --- Capa de superposición WMS de la Dirección General del Catastro ---
         const catastroWmsUrl = 'https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx';
-        const catastroLayer = L.tileLayer.wms(catastroWmsUrl, {
+        overlayLayers["Cartografía Catastral (WMS)"] = L.tileLayer.wms(catastroWmsUrl, {
             layers: 'Catastro',
             styles: '',
             format: 'image/png',
@@ -175,21 +213,12 @@
 
         // --- Añade capas iniciales al mapa ---
         // Mantenemos minimalBaseLayer como capa base por defecto
-        minimalBaseLayer.addTo(map);
-        catastroLayer.addTo(map);
+        baseLayers["Fondo Claro Minimalista"].addTo(map);
+        overlayLayers["Cartografía Catastral (WMS)"].addTo(map);
 
         // --- Configura el control de capas (se actualizará al cargar GeoJSON y otros datos) ---
-        const baseLayers = {
-            "Fondo Claro Minimalista": minimalBaseLayer,
-            "Híbrido Satélite+Etiquetas (Esri)": hybridEsriLayer
-        };
-
-        const overlayLayers = {
-             "Cartografía Catastral (WMS)": catastroLayer,
-             "Pasadas Generadas": generatedPassesLayer
-        };
-
-        let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
+        // Inicializa el control de capas por primera vez
+         updateLayersControl();
 
 
         // --- Funciones de carga de datos y actualización de interfaz ---
@@ -251,7 +280,7 @@
                  })
                  .then(arrayBuffer => {
                      console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
-                      // *** Intentar acceder a parseGeoRaster de forma segura (simplificado para paquete global) ***
+                      // *** Intentar acceder a parseGeoRaster de forma segura ***
                       let parseFn = undefined;
 
                       // Un paquete global debería exponer parseGeoRaster globalmente o bajo window.GeoRaster
@@ -382,8 +411,8 @@
                                  if (parcelasLayer) {
                                       parcelasLayer.addTo(map);
                                        overlayLayers["Mis Parcelas"] = parcelasLayer;
-                                  } else { allKeyDataLoadedSuccessfully = false; console.error("La capa de Parcelas no se pudo crear."); }
-                             } else { allKeyDataLoadedSuccessfully = false; console.error("Datos de Parcelas nulos o sin features."); }
+                                  } else { console.warn("La capa de Parcelas no se pudo crear."); } // Ya se marcó el error general arriba
+                             } else { console.warn("Datos de Parcelas nulos o sin features."); } // Ya se marcó el error general arriba
                          } else if (result.name === 'Construcciones') {
                               construccionesLayer = result.layer;
                               // Recopilar geometrías de exclusión (Polygon/MultiPolygon) si los datos son válidos
@@ -398,7 +427,6 @@
                                        construccionesLayer.addTo(map);
                                         overlayLayers["Construcciones"] = construccionesLayer;
                                   } else { console.warn("La capa de Construcciones no se pudo crear."); }
-
                               } else { console.warn("Datos de Construcciones nulos o vacíos."); }
                          } else if (result.name === 'Viales y Arroyos') {
                               elementosInternosLayer = result.layer;
@@ -442,22 +470,18 @@
                                } else { console.warn("Datos de Viales y Arroyos nulos o vacíos."); }
                          } else if (result.name === 'Elevación (MDT25)') {
                              elevationGeoRaster = result.georaster; // Almacenar el objeto georaster
-                             // La capa Leaflet ya se creó y añadió en loadGeoTIFFLayer si el georaster es válido
-                             if (!elevationGeoRaster) { allKeyDataLoadedSuccessfully = false; console.error("Objeto georaster nulo después de la carga."); }
-                             else {
+                              if (result.layer) { // Asegurarse de que la capa Leaflet se creó
                                   overlayLayers["Elevación (MDT25)"] = result.layer; // Añadir capa al control
-                                  if (result.layer) result.layer.addTo(map); // Añadir al mapa
-                                  else { console.warn("La capa Leaflet de Elevación no se pudo crear."); allKeyDataLoadedSuccessfully = false; }
-                             }
+                                  result.layer.addTo(map); // Añadir al mapa
+                              } else { console.warn("La capa Leaflet de Elevación no se pudo crear."); }
+                             if (!elevationGeoRaster) { console.warn("Objeto georaster de elevación nulo después de la carga."); } // Ya se marcó el error general arriba
                          } else if (result.name === 'Curvas de Nivel') {
                              contourLinesGeoJSON = result.data; // Almacenar los datos GeoJSON de curvas de nivel
-                              // La capa Leaflet ya se creó y añadió en loadGeoJSONLayer si los datos son válidos
-                              if (!contourLinesGeoJSON || !contourLinesGeoJSON.features) { allKeyDataLoadedSuccessfully = false; console.error("Datos GeoJSON de Curvas de Nivel nulos o sin features."); }
-                               else {
+                               if (result.layer) { // Asegurarse de que la capa Leaflet se creó
                                     overlayLayers["Curvas de Nivel"] = result.layer; // Añadir capa al control
-                                    if (result.layer) result.layer.addTo(map); // Añadir al mapa
-                                     else { console.warn("La capa Leaflet de Curvas de Nivel no se pudo crear."); allKeyDataLoadedSuccessfully = false; }
-                               }
+                                    result.layer.addTo(map); // Añadir al mapa
+                               } else { console.warn("La capa Leaflet de Curvas de Nivel no se pudo crear."); }
+                              if (!contourLinesGeoJSON || !contourLinesGeoJSON.features) { console.warn("Datos GeoJSON de Curvas de Nivel nulos o sin features."); } // Ya se marcó el error general arriba
                          }
 
                           // Las capas de Construcciones, Viales, Elevación y Curvas de Nivel se añaden
@@ -473,6 +497,8 @@
 
                 // Actualizar el control de capas final
                 updateLayersControl();
+                console.log("Called updateLayersControl after Promise.all");
+
 
                 // Ajustar la vista del mapa a la extensión de las Parcelas si se cargaron
                 if (parcelasLayer && parcelasLayer.getBounds().isValid()) {
@@ -484,33 +510,18 @@
 
                  // Habilitar el botón si todos los datos CLAVE cargaron sin errores reportados en Promise.all
                  // Los datos clave son: Parcelas (geoJSON y layer), Elevación (georaster y layer), Curvas de Nivel (geoJSON y layer)
-                 if (allKeyDataLoadedSuccessfully && parcelasGeoJSON && parcelasLayer && elevationGeoRaster && overlayLayers["Elevación (MDT25)"] && contourLinesGeoJSON && overlayLayers["Curvas de Nivel"]) {
+                 // Asumimos que si parcelasGeoJSON, elevationGeoRaster y contourLinesGeoJSON
+                 // existen (no nulos), la carga inicial fue considerada exitosa para habilitar la lógica.
+                 if (typeof turf !== 'undefined' && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
                      loadingStatusDiv.textContent = 'Datos cargados. Selecciona una parcela.';
                      // El botón se habilita en el evento 'change' del selector si la parcela es válida
-                     // Y si allKeyDataLoadedSuccessfully es true.
-                     // Ahora, el botón solo se habilita si ya se seleccionó una parcela Y LA CARGA FUE EXITOSA.
-                      // No habilitar aquí, se habilita en el evento 'change' si todo está listo.
-                     console.log("Carga automática de datos finalizada con éxito. Esperando selección de parcela.");
+                     // Y si los datos clave cargaron.
+                     // No habilitar aquí, se habilita en el evento 'change' si todo está listo.
+                     console.log("Carga automática de datos finalizada con éxito (verificaciones de datos clave). Esperando selección de parcela.");
                  } else {
-                      loadingStatusDiv.textContent = 'Carga de datos completada con errores.';
+                      loadingStatusDiv.textContent = 'Carga de datos completada con errores o datos faltantes.';
                       console.error("La carga automática de datos finalizó, pero faltan datos clave. El botón de generar pasadas está deshabilitado.");
-                      // Un alert general al final si hubo algún error de carga clave
-                       let missingData = [];
-                       if (!parcelasGeoJSON) missingData.push("Parcelas (datos)");
-                       if (!parcelasLayer) missingData.push("Parcelas (capa Leaflet)");
-                       if (!elevationGeoRaster) missingData.push("Elevación (georaster)");
-                       if (!overlayLayers["Elevación (MDT25)"]) missingData.push("Elevación (capa Leaflet)");
-                       if (!contourLinesGeoJSON) missingData.push("Curvas de Nivel (datos)");
-                       if (!overlayLayers["Curvas de Nivel"]) missingData.push("Curvas de Nivel (capa Leaflet)");
-
-                      if (missingData.length > 0) {
-                           alert(`No se pudieron cargar todos los datos necesarios. Faltan: ${missingData.join(", ")}. Revisa la consola para detalles.`);
-                      } else {
-                           // Si no hay datos faltantes explícitos pero allKeyDataLoadedSuccessfully es false,
-                           // podría ser un error en Construcciones/Viales o un error general no capturado.
-                           alert("La carga de datos finalizó con errores. Revisa la consola para detalles.");
-                      }
-
+                      // Puedes añadir logs más específicos aquí si quieres saber qué faltó exactamente
                  }
 
 
@@ -591,19 +602,8 @@
 
 
                                         // Habilitar botón solo si la parcela es válida Y los datos clave ya cargaron
-                                        // La bandera allKeyDataLoadedSuccessfully se establece en el Promise.all del DOMContentLoaded
-                                        // Necesitamos acceder a esa bandera. Podríamos hacerla global o re-verificar aquí.
-                                        // Re-verificar los objetos cargados es más seguro que depender de una bandera global.
-                                        // if (parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
-                                        //     generarPasadasBtn.disabled = false;
-                                        // }
-                                        // Mejor verificar directamente la bandera global o los objetos
-                                        // Si la carga inicial fue exitosa, habilitar el botón
-                                        // Asumimos que si parcelasGeoJSON, elevationGeoRaster y contourLinesGeoJSON
-                                        // existen aquí, la carga inicial fue considerada exitosa para habilitar la lógica.
-                                        // Una bandera global `window.allInitialDataLoadedSuccessfully = true;` en el .then final
-                                        // del Promise.all sería más robusto.
-                                        // Por ahora, verificamos si los objetos necesarios existen.
+                                        // Asumimos que si turf, parcelasGeoJSON, elevationGeoRaster, contourLinesGeoJSON existen,
+                                        // las librerías y datos clave están disponibles.
                                         if (typeof turf !== 'undefined' && parcelasGeoJSON && elevationGeoRaster && contourLinesGeoJSON) {
                                              generarPasadasBtn.disabled = false;
                                         } else {
@@ -681,12 +681,13 @@
                  return;
              }
              // Verificar que los datos clave para la lógica de elevación/curvas están disponibles
-            if (!elevationGeoRaster) {
+             // Usamos la existencia de los objetos esperados como verificación
+            if (typeof elevationGeoRaster === 'undefined' || elevationGeoRaster === null) {
                 alert("Los datos de elevación (MDT) no están disponibles. No se puede generar pasadas sensibles al terreno.");
                 console.warn("Objeto georaster de elevación no disponible:", elevationGeoRaster);
                 return;
             }
-             if (!contourLinesGeoJSON || !contourLinesGeoJSON.features) {
+             if (typeof contourLinesGeoJSON === 'undefined' || contourLinesGeoJSON === null || !contourLinesGeoJSON.features) {
                  alert("Los datos de curvas de nivel no están disponibles. No se puede generar pasadas sensibles al terreno.");
                  console.warn("Datos GeoJSON de curvas de nivel no disponibles o vacíos:", contourLinesGeoJSON);
                  return;
@@ -805,7 +806,7 @@
                   } catch(e) { console.error("Error calculando área:", e); return; }
 
 
-                // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A C I Ó N   Y   C U R V A S *** ---
+                // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A CI Ó N   Y   C U R V A S *** ---
                 // Esta es la parte que DEBES implementar basándote en tus datos cargados.
                 // El algoritmo para generar pasadas que cambian de dirección según la pendiente
                 // y siguen las curvas de nivel es complejo y requiere un diseño específico.
@@ -820,7 +821,7 @@
                 // - `slopeThresholdPercent`: El umbral de pendiente.
                 // - `map`: El objeto del mapa Leaflet.
                 // - `turf`: La librería Turf.js cargada.
-                // - `parseGeoRaster`: Debería estar accesible si la carga GeoRaster fue exitosa.
+                // - `parseGeoRaster`: Debería estar accesible si la carga GeoRaster fue exitosa (verificado en loadGeoTIFFLayer).
 
                 // Concepto del algoritmo (pseudocódigo - rellenar con lógica real):
                 // 1. Determinar una dirección general de inicio para las pasadas (ej. la más larga de la parcela limpia, o un ángulo fijo del input `angleInput.value`).
