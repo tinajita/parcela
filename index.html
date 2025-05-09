@@ -11,7 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
-    <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/georaster@1.6.0/dist/georaster.browser.bundle.min.js"></script>
     <script src="https://unpkg.com/georaster-layer-for-leaflet@3.8.0/dist/georaster-layer-for-leaflet.min.js"></script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
@@ -111,7 +111,7 @@
         console.log("Contenido de window después de cargar librerías:");
         for (let key in window) {
             // Añadir una comprobación hasOwnProperty para evitar propiedades heredadas si es necesario
-            // if (window.hasOwnProperty(key)) {
+            if (window.hasOwnProperty(key)) {
                 const lowerKey = key.toLowerCase();
                 if (lowerKey.includes('georaster') || lowerKey.includes('geotiff') || (typeof window[key] === 'function' && lowerKey.includes('parse'))) {
                      // Limitar la profundidad para evitar logs excesivos de objetos complejos
@@ -124,7 +124,7 @@
                      }
 
                 }
-            // }
+            }
         }
         console.log("--- Fin Contenido de window ---");
 
@@ -170,7 +170,7 @@
 
             // --- Variables para los nuevos datos de elevación y curvas de nivel ---
             let elevationGeoRaster = null; // Para almacenar el objeto GeoRaster del MDT cargado
-            let contourLinesGeoJSON = null; // Para almacenar los datos GeoJSON de las curvas de nivel cargadas
+            let contourLinesGeoJSON = null; // Para almacenar los datos GeoJSON de curvas de nivel cargadas
 
 
             // --- Elementos de la interfaz ---
@@ -286,13 +286,14 @@
                           // *** Intentar acceder a parseGeoRaster de forma segura ***
                           let parseFn = undefined;
 
-                          // Un paquete global debería exponer parseGeoRaster globalmente o bajo window.GeoRaster
+                          // Un paquete global debería exponer parseGeoraster globalmente o bajo window.GeoRaster
                           // También verificamos window.georaster y si GeoRasterLayer tiene el método, por robustez.
-                          if (typeof parseGeoRaster !== 'undefined') { // Ámbito global
-                               parseFn = parseGeoRaster;
+                          // Intentando acceder a parseGeoraster que esperamos que esté globalmente disponible con el nuevo CDN
+                          if (typeof parseGeoraster !== 'undefined') { // Ámbito global
+                               parseFn = parseGeoraster;
                                console.log("parseFn encontrado en ámbito global.");
                           } else if (typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.parseGeoRaster === 'function') {
-                               // Bajo window.GeoRaster (nombre común)
+                               // Bajo window.GeoRaster (nombre común) - Aunque los logs sugieren que esto no sucede con el paquete anterior, lo mantenemos por robustez
                                parseFn = window.GeoRaster.parseGeoRaster;
                                console.log("parseFn encontrado bajo window.GeoRaster.");
                           } else if (typeof window.georaster !== 'undefined' && typeof window.georaster.parseGeoRaster === 'function') {
