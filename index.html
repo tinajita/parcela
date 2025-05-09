@@ -164,12 +164,12 @@
             loadingStatusDiv.textContent = 'Cargando datos geoespaciales...';
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
-            // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
-            const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
-            const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
-            const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/curvas_nivel/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
-            const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/MDT/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF)
+            // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES (CORREGIDAS AL REPOSITORIO 'parcela') ***
+            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (esta parecía correcta)
+            const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (corregida si estaba mal)
+            const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (corregida si estaba mal)
+            const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (usando repo 'parcela')
+            const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/raw/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF - usando repo 'parcela')
              // *** FIN URLs ***
 
              const units = 'meters'; // Unidades para Turf.js (buffer)
@@ -309,7 +309,7 @@
                        loadingStatusDiv.textContent += ' Advertencia: Datos de Viales/Arroyos inválidos.';
                  }
 
-                // --- Código para cargar la capa de curvas de nivel (GeoJSON) - ESTILO MODIFICADO ---
+                // --- Código para cargar la capa de curvas de nivel (GeoJSON) - ESTILO DISCRETO Y URL CORREGIDA ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
                   if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
                        curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
@@ -364,7 +364,7 @@
                  }
                 // --- Fin del código para curvas de nivel ---
 
-                // --- Código para manejar la carga del MDT (TIFF) - No se crea una capa visible por defecto ---
+                // --- Código para manejar la carga del MDT (TIFF) - URL CORREGIDA. No se crea una capa visible por defecto ---
                  console.log("Intento de carga de MDT (TIFF) completado.");
                  // Puedes añadir aquí código para procesar el TIFF si tuvieras una librería JS capaz de hacerlo,
                  // o simplemente usar esta confirmación de carga para saber que el archivo existe en la URL.
