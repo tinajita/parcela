@@ -83,8 +83,9 @@
         let parcelasLayer = null; // Capa para parcelas (seleccionable)
         let construccionesLayer = null; // Capa para construcciones (exclusión)
         let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
-        let curvasNivelLayer = null; // <--- Nueva variable para la capa de curvas de nivel
-        window.exclusionFeatures = []; // <--- Modificado: Declarada explícitamente en window
+        let curvasNivelLayer = null; // Variable para la capa de curvas de nivel
+        let mdtLayer = null; // Variable para la capa del MDT (aunque no se use para cálculo de pendiente automática)
+        window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
         // --- Elementos de la interfaz ---
@@ -142,7 +143,7 @@
         const overlayLayers = {
              "Cartografía Catastral (WMS)": catastroLayer,
              "Pasadas Generadas": generatedPassesLayer
-             // Las capas GeoJSON se añadirán aquí después de cargarse
+             // Las capas GeoJSON y MDT se añadirán aquí después de cargarse
         };
 
         let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
@@ -156,24 +157,26 @@
              layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
         }
 
-        // --- Carga automática de los 3 archivos GeoJSON al cargar la página ---
+        // --- Carga automática de los 4 archivos (3 GeoJSONs y 1 TIFF) al cargar la página ---
         document.addEventListener('DOMContentLoaded', function() {
-            console.log("El DOM está cargado. Iniciando carga automática de datos GeoJSON.");
-            console.log("Estado de exclusionFeatures global al inicio del DOMContentLoaded:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null'); // Log 1
+            console.log("El DOM está cargado. Iniciando carga automática de datos geoespaciales.");
+            console.log("Estado de exclusionFeatures global al inicio del DOMContentLoaded:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null');
             loadingStatusDiv.textContent = 'Cargando datos geoespaciales...';
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
-            // *** LAS URLs DE TUS ARCHIVOS GeoJSON ***
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // <--- URL DE PARCELAS (seleccionable)
-            const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // <--- URL DE CONSTRUCCIONES (exclusión)
-            const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // <--- URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
-            const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // <--- NUEVA URL DE CURVAS DE NIVEL
+            // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
+            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
+            const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
+            const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
+            const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/curvas_nivel/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
+            const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/MDT/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF)
              // *** FIN URLs ***
 
              const units = 'meters'; // Unidades para Turf.js (buffer)
              const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
 
-            // Usar Promise.all para cargar los 4 archivos concurrentemente
+            // Usar Promise.all para cargar los archivos concurrentemente
+            // Incluimos el fetch del GeoJSON de curvas de nivel y el TIFF del MDT
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
                      if (!response.ok) throw new Error(`Error al cargar Parcelas: ${response.statusText}`);
@@ -187,15 +190,21 @@
                      if (!response.ok) throw new Error(`Error al cargar Elementos Internos: ${response.statusText}`);
                      return response.json();
                 }),
-                // --- Nueva promesa para cargar las curvas de nivel ---
+                 // Nueva promesa para cargar las curvas de nivel (GeoJSON)
                  fetch(curvasNivelGeojsonDataUrl).then(response => {
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
+                 }),
+                 // Nueva promesa para intentar cargar el MDT (TIFF) - no se usa para cálculo de pendiente automático en este código
+                 fetch(mdtGeoTiffDataUrl).then(response => {
+                      if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
+                       // Para TIFF, simplemente retornamos la respuesta para saber que se cargó (o no)
+                       console.log("MDT (TIFF) fetch successful. Status:", response.status);
+                      return response; // No procesamos el contenido aquí para este código
                  })
-                 // --- Fin nueva promesa ---
             ])
-            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData]) => { // <-- Añadir 'curvasNivelGeojsonData' aquí
-                console.log("Los 4 archivos GeoJSON se cargaron con éxito (primer paso de fetch/json).");
+            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => { // Añadir los parámetros correspondientes
+                console.log("Los archivos GeoJSON y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
                 console.log("Inspeccionando y cargando capa de Parcelas...");
@@ -238,7 +247,7 @@
                            onEachFeature: (feature, layer) => {
                                if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
                                   const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                   window.exclusionFeatures.push(clonedFeature); // <--- Modificado: Usar window.exclusionFeatures
+                                   window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
                               } else {
                                    console.warn("Geometría de construcción no es Polígono/MultiPolígono. No se usará para recorte:", feature.geometry);
                               }
@@ -271,8 +280,8 @@
                                            const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
                                             if (buffered) {
                                                 if (buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
-                                                     const bufferedFeature = JSON.parse(JSON.stringify(buffered));
-                                                     window.exclusionFeatures.push(bufferedFeature); // <--- Modificado: Usar window.exclusionFeatures
+                                                     const bufferedFeature = JSON.parse(JSON.stringify(feature));
+                                                     window.exclusionFeatures.push(bufferedFeature); // Usar window.exclusionFeatures
                                                 } else {
                                                     console.warn("El buffer de LineString no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión:", buffered);
                                                 }
@@ -286,7 +295,7 @@
 
                                    } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
                                        const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                       window.exclusionFeatures.push(clonedFeature); // <--- Modificado: Usar window.exclusionFeatures
+                                       window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
                                    } else {
                                         console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) no es LineString, Polígono o MultiPolígono. No se usará para recorte:`, feature.geometry);
                                    }
@@ -300,9 +309,8 @@
                        loadingStatusDiv.textContent += ' Advertencia: Datos de Viales/Arroyos inválidos.';
                  }
 
-                // --- Nuevo código para cargar la capa de curvas de nivel ---
+                // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
-                 // La variable curvasNivelLayer ya está declarada al inicio del script
                   if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
                        curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
                            style: function(feature) {
@@ -315,21 +323,38 @@
                            },
                            onEachFeature: function(feature, layer) {
                                 // Opcional: añadir popups con información si las curvas tienen propiedades (ej: elevación)
-                                // Aquí asumimos que tus curvas tienen una propiedad llamada 'ELEVACION'
-                                if (feature.properties && feature.properties.hasOwnProperty('ELEVACION')) {
-                                    layer.bindPopup('Elevación: ' + feature.properties.ELEVACION + ' m');
-                                } else if (feature.properties && feature.properties.hasOwnProperty('valor')) {
-                                     // Si la propiedad se llama 'valor' en lugar de 'ELEVACION'
-                                     layer.bindPopup('Elevación: ' + feature.properties.valor + ' m');
+                                // Intenta identificar la propiedad que contiene la elevación
+                                if (feature.properties) {
+                                    let elevation = null;
+                                    if (feature.properties.hasOwnProperty('ELEVACION')) {
+                                        elevation = feature.properties.ELEVACION;
+                                    } else if (feature.properties.hasOwnProperty('valor')) {
+                                        elevation = feature.properties.valor;
+                                    } else if (feature.properties.hasOwnProperty('altura')) {
+                                        elevation = feature.properties.altura;
+                                    }
+                                    // Añade aquí otras propiedades comunes si tu GeoJSON usa otro nombre
+                                    // else if (feature.properties.hasOwnProperty('otra_propiedad')) {
+                                    //      elevation = feature.properties.otra_propiedad;
+                                    // }
+
+                                    if (elevation !== null) {
+                                        layer.bindPopup('Elevación: ' + elevation + ' m');
+                                    } else {
+                                         // Si no se encuentra una propiedad de elevación conocida, muestra todas las propiedades
+                                         let popupContent = 'Propiedades:<br>';
+                                         for (const key in feature.properties) {
+                                             if (feature.properties.hasOwnProperty(key)) {
+                                                  popupContent += `<b>${key}:</b> ${feature.properties[key]}<br>`;
+                                             }
+                                         }
+                                         layer.bindPopup(popupContent);
+                                    }
                                 }
-                                // Añade otras propiedades si sabes cómo se llaman (ej: 'altitude', 'contour')
-                                // else if (feature.properties && feature.properties.hasOwnProperty('alguna_otra_propiedad')) {
-                                //      layer.bindPopup('Info: ' + feature.properties.alguna_otra_propiedad);
-                                // }
                            }
                        }).addTo(map); // Añadimos la capa al mapa por defecto (puedes quitar .addTo(map) si no quieres que esté activa al inicio)
 
-                       // --- Añadir la nueva capa al control de capas ---
+                       // Añadir la nueva capa al control de capas
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
                        console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
 
@@ -337,15 +362,29 @@
                       console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
                        loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                  }
-                // --- Fin del nuevo código ---
+                // --- Fin del código para curvas de nivel ---
+
+                // --- Código para manejar la carga del MDT (TIFF) - No se crea una capa visible por defecto ---
+                 console.log("Intento de carga de MDT (TIFF) completado.");
+                 // Puedes añadir aquí código para procesar el TIFF si tuvieras una librería JS capaz de hacerlo,
+                 // o simplemente usar esta confirmación de carga para saber que el archivo existe en la URL.
+                 if (mdtTiffResponse && mdtTiffResponse.ok) {
+                      console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
+                      // Aquí podrías añadir una capa de TileLayer si tuvieras un servidor sirviendo el MDT como teselas WMS/XYZ
+                      // o usar una librería como geotiff.js para leer el ráster si es necesario para futuros desarrollos de análisis.
+                 } else {
+                      console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
+                       loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar MDT TIFF.';
+                 }
+                // --- Fin código MDT ---
 
 
-                 console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos: ${window.exclusionFeatures.length}`); // <--- Modificado: Usar window.exclusionFeatures
-                 console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures); // Log 2 - Modificado para usar window.
+                 console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos: ${window.exclusionFeatures.length}`);
+                 console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures);
 
 
                  // Actualizar el control de capas con las nuevas capas cargadas
-                updateLayersControl(); // <--- Asegúrate de que esto esté después de añadir todas las capas a overlayLayers
+                updateLayersControl(); // Asegúrate de que esto esté después de añadir todas las capas a overlayLayers
 
                 // Ajustar la vista del mapa a la extensión de las Parcelas si se cargaron
                 if (parcelasLayer && parcelasLayer.getBounds().isValid()) {
@@ -360,9 +399,9 @@
 
             })
             .catch(error => {
-                console.error("Error durante la carga automática de datos GeoJSON:", error);
+                console.error("Error durante la carga automática de datos geoespaciales:", error);
                 loadingStatusDiv.textContent = `Error al cargar datos: ${error.message}`;
-                alert(`Ocurrió un error al cargar uno o más archivos GeoJSON. Revisa las URLs y la consola para más detalles. Error: ${error.message}`);
+                alert(`Ocurrió un error al cargar uno o más archivos geoespaciales. Revisa las URLs y la consola para más detalles. Error: ${error.message}`);
             });
         });
 
@@ -381,7 +420,7 @@
             // --- FIN VERIFICACIÓN ---
 
             console.log("--- Inicio Generación de Pasadas ---");
-            console.log("Estado de window.exclusionFeatures al inicio del click:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null', window.exclusionFeatures); // Log 3
+            console.log("Estado de window.exclusionFeatures al inicio del click:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null', window.exclusionFeatures);
 
 
             // Asegurarse de que haya una parcela seleccionada y sea un polígono válido
@@ -411,8 +450,6 @@
 
 
             try {
-                // Eliminamos la línea: let exclusionFeatures = []; // Ya no es necesaria, usamos window.exclusionFeatures directamente
-
                 let intersectingExclusionFeatures = []; // Array para almacenar las FEATURES de exclusión que INTERSECTAN
                 // Usamos la variable global exclusionFeatures poblada al inicio
                 const globalExclusionFeatures = window.exclusionFeatures || []; // Acceder a la variable global
@@ -1217,7 +1254,7 @@
 
         // --- LOGS INICIALES ---
         console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
-        console.log("La carga automática de datos GeoJSON comenzará al terminar de cargar el DOM.");
+        console.log("La carga automática de datos geoespaciales comenzará al terminar de cargar el DOM.");
 
     </script>
 
