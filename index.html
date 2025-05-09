@@ -258,25 +258,40 @@
                  .then(arrayBuffer => {
                      console.log("Archivo GeoTIFF cargado en ArrayBuffer. Intentando parsear GeoRaster...");
                       // *** MODIFICACIÓN AQUÍ: Intentar acceder a parseGeoRaster de forma segura ***
-                      // Verificar si parseGeoRaster está directamente en el ámbito global
-                      // La versión 1.6.0 de unpkg parece exponerlo globalmente.
-                     let parseFn = typeof parseGeoRaster !== 'undefined' ? parseGeoRaster : undefined;
+                      let parseFn = undefined;
 
-                     // Si no está globalmente (para compatibilidad futura o con otros bundles)
-                     // verificar si está bajo window.GeoRaster o GeoRasterLayer (menos probable para v1.6)
+                      // 1. Check global scope
+                     if (typeof parseGeoRaster !== 'undefined') {
+                          parseFn = parseGeoRaster;
+                          console.log("parseFn encontrado en ámbito global.");
+                     }
+                      // 2. Check under window.GeoRaster (uppercase G)
                      if (typeof parseFn === 'undefined' && typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.parseGeoRaster === 'function') {
                           parseFn = window.GeoRaster.parseGeoRaster;
                           console.log("parseFn encontrado bajo window.GeoRaster.");
-                     } else if (typeof parseFn === 'undefined' && typeof GeoRasterLayer !== 'undefined' && typeof GeoRasterLayer.parseGeoRaster === 'function') {
-                         // Algunos bundles podrían adjuntar parseGeoRaster a GeoRasterLayer
-                          parseFn = GeoRasterLayer.parseGeoRaster;
-                          console.log("parseFn encontrado bajo GeoRasterLayer.");
-                     } else if (typeof parseFn === 'undefined') {
+                     }
+                      // 3. Check under window.georaster (lowercase g) - NUEVO CHECK
+                      if (typeof parseFn === 'undefined' && typeof window.georaster !== 'undefined' && typeof window.georaster.parseGeoRaster === 'function') {
+                           parseFn = window.georaster.parseGeoRaster;
+                           console.log("parseFn encontrado bajo window.georaster.");
+                      }
+                      // 4. Check under window.GeoRaster.default
+                     if (typeof parseFn === 'undefined' && typeof window.GeoRaster !== 'undefined' && typeof window.GeoRaster.default !== 'undefined' && typeof window.GeoRaster.default.parseGeoRaster === 'function') {
+                           parseFn = window.GeoRaster.default.parseGeoRaster;
+                           console.log("parseFn encontrado bajo window.GeoRaster.default.");
+                     }
+                      // Omitiendo las verificaciones menos comunes para GeoRasterLayer.parseGeoRaster y parseGeoRasterLayer global
+                      // a menos que esta búsqueda mejorada falle.
+
+                     if (typeof parseFn === 'undefined') {
                           // Si aún no se encuentra, loggear para depurar y rechazar la promesa
-                           console.error("parseGeoRaster no definido globalmente, bajo window.GeoRaster, ni bajo GeoRasterLayer.");
+                           console.error("parseGeoRaster (o similar) no definido globalmente o bajo window.GeoRaster/georaster.");
                            // Ayuda de depuración: mostrar lo que SÍ está en el ámbito global o en objetos relacionados
                            if (typeof window.GeoRaster !== 'undefined') {
-                                console.log("Contenido de window.GeoRaster:", window.GeoRaster);
+                                console.log("Contenido de window.GeoRaster para depuración:", window.GeoRaster);
+                           }
+                            if (typeof window.georaster !== 'undefined') { // Log para la nueva verificación
+                                console.log("Contenido de window.georaster para depuración:", window.georaster);
                            }
                            if (typeof GeoRasterLayer !== 'undefined') {
                                 console.log("Contenido de GeoRasterLayer:", GeoRasterLayer);
@@ -642,8 +657,20 @@
         // El selector 'avoid-select' en el HTML original no tenía funcionalidad asociada.
         // Si necesitas implementar la selección de zonas a evitar desde un select, necesitarías
         // poblarlo con opciones (ej. IDs de construcciones/viales) y manejar su selección.
-        // La lógica de exclusión de zonas a evitar en la generación de pasadas ya usa la variable
-        // global `window.exclusionFeatures` poblada al inicio. Puedes usar esa variable.
+        // La variable global `window.exclusionFeatures` ya contiene las geometrías de exclusión cargadas
+        // (Construcciones y Elementos Linea con buffer si eran líneas).
+        // Tu lógica en el evento click ya filtra las que intersectan con la parcela seleccionada
+        // y las usa para calcular el área limpia. Puedes usar esa variable.
+        // Si quieres poder SELECCIONAR zonas a evitar manualmente en el mapa, necesitarías:
+        // 1. Hacer las capas de Construcciones y Viales interactivas (onEachFeature con click listeners).
+        // 2. Tener una forma (ej. un botón o modo) para indicar que estás seleccionando zonas a evitar.
+        // 3. Al hacer clic en una feature de Construcción o Vial, añadir su geometría (o su buffer si es LineString)
+        //    a una lista TEMPORAL de "zonas a evitar seleccionadas por el usuario" para la generación de pasadas actual.
+        // 4. Usar esta lista TEMPORAL en la lógica de exclusión dentro del botón de generar pasadas,
+        //    EN LUGAR de (o además de) usar la variable global `window.exclusionFeatures` completa.
+        // 5. Proporcionar alguna retroalimentación visual de las zonas a evitar seleccionadas por el usuario.
+        // Esta implementación es compleja y va más allá del alcance actual. Por ahora, la lógica usa TODAS
+        // las exclusiones cargadas que intersectan la parcela.
 
 
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS Y DATOS DE ELEVACIÓN/CURVAS ---
@@ -740,7 +767,8 @@
                          // turf.union puede manejar múltiples polígonos/multipolígonos
                          // Necesita ser FeatureCollection o un array de Features
                          const unionFeatureCollection = turf.featureCollection(intersectingExclusionFeatures);
-                         const unionOfExclusions = turf.union(...unionFeatureCollection.features); // Pasar features individuales
+                         // turf.union puede devolver null si la entrada no es válida para una unión
+                         const unionOfExclusions = unionFeatureCollection.features.length > 0 ? turf.union(...unionFeatureCollection.features) : null;
 
                          if (unionOfExclusions && unionOfExclusions.geometry) {
                              // turf.difference(feature1, feature2) feature1 - feature2
@@ -757,7 +785,7 @@
                              }
                          } else {
                              console.warn("Resultado de turf.union de exclusiones es nulo o sin geometría. Usando geometría de parcela completa para pasadas.");
-                              alert("Advertencia: No se pudo unir las áreas a evitar correctamente. Generando pasadas sobre la parcela completa.");
+                              // alert("Advertencia: No se pudo unir las áreas a evitar correctamente. Generando pasadas sobre la parcela completa."); // Evitar alert repetido
                          }
                      } catch (e) {
                          console.error("Error en lógica de unión/diferencia para exclusiones:", e);
@@ -778,17 +806,20 @@
                      // Asegurarse de que turf.area reciba un FeatureCollection o Feature, no solo la geometría
                       const areaFeature = turf.feature(geometryForCalculations);
                       if (areaFeature && areaFeature.geometry) {
+                           // turf.area devuelve 0 para geometrías vacías o inválidas también
                            if (turf.area(areaFeature) === 0) {
                                 alert("El área para generar pasadas es cero.");
                                 return;
                            }
                       } else {
                            console.warn("No se pudo crear un feature válido para calcular el área.");
+                           alert("Error: No se pudo crear un feature válido para el área de pasadas.");
+                           return;
                       }
                   } catch(e) { console.error("Error calculando área:", e); return; }
 
 
-                // --- *** N U E V A   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A C I Ó N   Y   C U R V A S *** ---
+                // --- *** N U E V a   L Ó G I C A   D E   G E N E R A C I Ó N   C O N   E L E V A C I Ó N   Y   C U R V A S *** ---
                 // Esta es la parte que DEBES implementar basándote en tus datos cargados.
                 // El algoritmo para generar pasadas que cambian de dirección según la pendiente
                 // y siguen las curvas de nivel es complejo y requiere un diseño específico.
@@ -803,28 +834,10 @@
                 // - `slopeThresholdPercent`: El umbral de pendiente.
                 // - `map`: El objeto del mapa Leaflet.
                 // - `turf`: La librería Turf.js cargada.
+                // - `parseGeoRaster`: Debería estar accesible si la carga GeoRaster fue exitosa.
 
                 // Concepto del algoritmo (pseudocódigo - rellenar con lógica real):
-                // 1. Determinar una dirección general de inicio para las pasadas (ej. la más larga de la parcela limpia, o un ángulo fijo del input `angleInput.value`).
-                // 2. Generar puntos de partida para las pasadas en esa dirección general, separados por el `workingWidth`, cubriendo el ancho del área limpia.
-                // 3. Para cada punto de partida:
-                //    a. Empezar a trazar la pasada a partir de ese punto.
-                //    b. Muestrear puntos a intervalos cortos (ej. cada 1-2 metros) a lo largo de la pasada.
-                //    c. Para cada punto de muestreo (o segmento entre puntos):
-                //       i. **Obtener la elevación:** Usar `elevationGeoRaster.getValueAt(lng, lat, { planar: true })` con las coordenadas del punto (en WGS84). Ojo: `getValueAt` puede ser asíncrono (devuelve Promise). Necesitarás manejar Promesas si el método es asíncrono.
-                //       ii. **Calcular la pendiente:** Estimar la pendiente en ese punto/segmento. Esto es complejo. Una forma simple es obtener la elevación de puntos vecinos (en el ráster) y calcular la diferencia / distancia. Una forma más avanzada requeriría un análisis de pendiente local sobre el `georaster`.
-                //       iii. **Tomar decisión según la pendiente:**
-                //           - Si la pendiente es MAYOR que `slopeThresholdPercent`:
-                //               - La dirección para el siguiente segmento de la pasada DEBE ser **paralela a la curva de nivel cercana**.
-                //               - Usar `turf.nearestPointOnLine` con el punto actual y el `contourLinesGeoJSON` (el FeatureCollection de líneas) para encontrar el punto más cercano en una curva de nivel Y la curva de nivel misma.
-                //               - Obtener la dirección de la curva de nivel en ese punto (esto es complejo, podría requerir muestrear la curva cercana o usar turf.along/bearing en la curva). La dirección de la curva de nivel es la tangente.
-                //               - La dirección deseada para la pasada es **paralela** a esa tangente (la misma dirección que la curva en ese punto).
-                //               - Generar el siguiente punto de la pasada siguiendo esta dirección **paralela** por la distancia de muestreo.
-                //           - Si la pendiente es MENOR o igual que `slopeThresholdPercent`:
-                //               - Seguir la **dirección general** de barrido inicial para el siguiente segmento.
-                //               - Generar el siguiente punto de la pasada siguiendo la dirección general por la distancia de muestreo.
-                //       iv. Asegurarse de que el punto generado sigue dentro de `geometryForCalculations` (el área limpia) usando `turf.booleanPointInPolygon`. Si sale, terminar el segmento actual.
-                //    d. Conectar los puntos generados para formar los segmentos de pasada y añadirlos a `generatedPassesFeatures`.
+                // ... (El pseudocódigo detallado que ya tenías) ...
 
                 // --- ESTE ES UN EJEMPLO RECTO/BARRIDO SIMPLE QUE DEBES REEMPLAZAR ---
                 // Utiliza `geometryForCalculations` (el área limpia) en lugar de la parcela original.
@@ -839,16 +852,9 @@
                      // Por ahora, usaré un ángulo fijo (ej. 0 grados - horizontal) o el valor del input si es razonable.
                      // Si 15 es el ancho, el ángulo de barrido debería ser un input separado.
                      // Usaré un ángulo de barrido de 0 grados (horizontal) como ejemplo, o podrías añadir un input para el ángulo.
-                     // const sweepAngle = 0; // Ángulo fijo (ej. horizontal)
-                     // Si el input de workingWidth *debe* controlar el ángulo de barrido, úsalo así:
-                      const sweepAngle = parseFloat(workingWidthInput.value); // Interpretando workingWidth como ángulo (menos común)
-                      if (isNaN(sweepAngle) || sweepAngle < 0 || sweepAngle > 360) {
-                          console.warn("Ángulo de barrido inválido, usando 0 grados.");
-                          const actualSweepAngle = 0;
-                      } else {
-                           const actualSweepAngle = sweepAngle;
-                      }
-                      console.log(`Usando ángulo de barrido (simulado): ${actualSweepAngle} grados.`);
+                      const inputSweepAngle = parseFloat(workingWidthInput.value);
+                      const actualSweepAngle = (!isNaN(inputSweepAngle) && inputSweepAngle >= 0 && inputSweepAngle <= 360) ? inputSweepAngle : 0; // Usar input si es válido, si no 0.
+                       console.log(`Usando ángulo de barrido (simulado): ${actualSweepAngle} grados.`);
 
 
                      const density = workingWidth; // Densidad es el ancho de trabajo
@@ -859,7 +865,7 @@
                      // perpendicular a la dirección del barrido, y que atraviese el bbox.
                      const bboxCenter = turf.center(areaFeatureForSweep);
 
-                     // Calcular un punto de inicio que esté "fuera" del bbox en la dirección opuesta al barrido,
+                     // Calcular un punto de inicio lejos en la dirección opuesta al barrido,
                      // y luego moverlo perpendicularmente para que cruce el bbox.
                      const distanceToCover = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units}) * 1.5; // Distancia segura para cubrir el bbox
 
@@ -878,9 +884,7 @@
 
                        let safetyCounter = 0;
                        // Estimar el número de pasadas necesarias
-                       const bboxWidthPerpendicularToSweep = Math.abs(turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units}) * Math.sin(actualSweepAngle * Math.PI / 180)); // Esto es una simplificación
-                        // Una estimación más robusta sería proyectar los puntos de la envolvente convexa sobre una línea perpendicular al barrido y encontrar la distancia máxima.
-                       // Para simplificar, usaremos la diagonal del bbox como una cota superior para el ancho
+                       // Usaremos la diagonal del bbox como una cota superior para el ancho perpendicular
                        const bboxDiagonal = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[3]]), {units: units});
                        const totalSweepExtent = bboxDiagonal + density; // Asegurar que cubra la diagonal + margen
 
@@ -931,7 +935,7 @@
 
                                          }
                                     } else {
-                                         console.warn(`Número impar de puntos de intersección (${points.length}) encontrados en la línea de barrido. No se pueden emparejar correctamente.`);
+                                         console.warn(`Número impar de puntos de intersección (${points.length}) encontrados en la línea de barrido ${safetyCounter}. No se pueden emparejar correctamente.`);
                                          // Opcional: intentar añadir los puntos como puntos de la pasada si no se pueden formar líneas
                                          // generatedPassesFeatures.push(...points.map(p => turf.point(p)));
                                     }
@@ -998,9 +1002,7 @@
 
 
                 loadingStatusDiv.textContent = `Pasadas generadas: ${generatedPassesFeatures.length} segmentos.`;
-                console.log("--- Fin Generación de Pasadas ---"); // La línea es sintácticamente correcta.
-                                                                  // El comentario original "Syntax Error is here" probablemente
-                                                                  // se refería a un error en el código anterior que se manifestaba aquí.
+                console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
                console.error("Error general en el evento click de generación de pasadas:", e);
