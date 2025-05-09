@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
-<headd>
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
@@ -8,10 +8,23 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
 
+    <!-- !!! IMPORTANTE: ORDEN DE CARGA DE SCRIPTS - CADA UNO EN SU LINEA !!! -->
+    <!-- 1. Leaflet (CSS ya arriba) -->
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 
+    <!-- 2. Librerías GEO que dependen de Leaflet y entre sí -->
+    <!-- proj4js debe cargarse antes de georaster si georaster lo necesita para proyecciones -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/georaster@1.6.0/dist/bundle.js"></script> <script src="https://unpkg.com/georaster-layer-for-leaflet@3.8.0/dist/georaster-layer-for-leaflet.min.js"></script> <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+    <!-- georaster debe cargarse ANTES que georaster-layer-for-leaflet -->
+    <script src="https://cdn.jsdelivr.net/npm/georaster@1.6.0/dist/bundle.js"></script> <!-- Probando georaster v1.6.0 jsdelivr -->
+    <!-- georaster-layer-for-leaflet debe cargarse DESPUÉS de Leaflet y georaster -->
+    <script src="https://unpkg.com/georaster-layer-for-leaflet@3.8.0/dist/georaster-layer-for-leaflet.min.js"></script> <!-- Probando layer v3.8.0 unpkg -->
+
+    <!-- 3. Librerías generales como Turf.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+    <!-- !!! FIN ORDEN DE CARGA DE SCRIPTS !!! -->
+
+
     <style>
         #map {
             height: 500px;
@@ -60,15 +73,19 @@
 <body>
 
     <div class="control-container">
+        <!-- Añadidos selectores de parcela y zona a evitar -->
         <label for="parcel-select">Seleccionar Parcela:</label>
         <select id="parcel-select">
            <option value="">-- Seleccionar --</option>
-           </select>
+           <!-- Opciones cargadas por JavaScript -->
+        </select>
 
-         <label for="avoid-select">Seleccionar Zona a Evitar:</label>
+         <!-- El selector de zona a evitar no estaba funcional en el original, lo mantengo como placeholder si lo necesitas -->
+        <label for="avoid-select">Seleccionar Zona a Evitar:</label>
         <select id="avoid-select">
             <option value="">-- Seleccionar --</option>
-            </select>
+            <!-- Opciones cargadas por JavaScript si implementas esa lógica -->
+        </select>
 
 
         <label for="workingWidth">Ancho de Trabajo (m):</label>
@@ -82,6 +99,7 @@
         <div id="map"></div>
     </div>
 
+    <!-- Tu script principal DEBE ir DESPUÉS de cargar TODAS las librerías de las que depende -->
     <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
         if (typeof turf === 'undefined') {
@@ -656,7 +674,7 @@
                 // TU LÓGICA EXISTENTE PARA CALCULAR `geometryForCalculations`
                 // A PARTIR DE `parcelGeometry` y `intersectingExclusionFeatures` VA AQUÍ.
                 // (El código extenso que tenías antes con turf.union, turf.difference, turf.simplify)
-                // Asegúrate de que, si la lógica de exclusión se ejecuta, `geometryForCalculations`
+                // Asegúrate de que, if the exclusion logic runs, `geometryForCalculations`
                 // se actualice a la geometría del área limpia resultante (Polygon o MultiPolygon).
                 // Si no hay exclusiones o la lógica falla, `geometryForCalculations` debe seguir siendo la `parcelGeometry`.
 
@@ -829,7 +847,7 @@
 
                              safetyCounter++;
                              if (safetyCounter >= maxSweeps) {
-                                console.warn(`Se alcanzó el límite máximo de ${maxSweeps} líneas de barrido. El área limpia podría no estar completamente cubierta.");
+                                console.warn(`Se alcanzó el límite máximo de ${maxSweeps} líneas de barrido. El área limpia podría no estar completamente cubierta.`);
                              }
 
                        } // Fin bucle while
@@ -853,7 +871,7 @@
 
 
                 loadingStatusDiv.textContent = `Pasadas generadas: ${generatedPassesFeatures.length} segmentos.`;
-                console.log("--- Fin Generación de Pasadas ---");
+                console.log("--- Fin Generación de Pasadas ---"); // Syntax Error is here in the original file!
 
            } catch (e) {
                console.error("Error general en el evento click de generación de pasadas:", e);
