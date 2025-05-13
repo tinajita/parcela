@@ -224,7 +224,8 @@
                        }
                        const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
                        const image = await tiff.getImage(); // Generalmente, solo hay una imagen en un GeoTIFF
-                       console.log("MDT (TIFF) parsed successfully. Image metadata:", image.getMetadata());
+                       // CORRECCIÓN: Acceder a la metadata a través de la propiedad fileDirectory en v2.1.3
+                       console.log("MDT (TIFF) parsed successfully. Image metadata:", image.fileDirectory);
                        mdtGeoTiffImage = image; // Almacenar la imagen parseada globalmente
                        return image; // Retornamos la imagen parseada
                  })
@@ -1168,8 +1169,7 @@
                      console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
                 } else { // Pasadas verticales en espacio rotado
                     rotatedStartSweepCoordValue = rotatedBboxWest;
-                    // CORRECCIÓN: Quitar el espacio extra aquí
-                    rotatedEndSweepCoordValue = rotatedBboxEast; // Línea corregida
+                    rotatedEndSweepCoordValue = rotatedBboxEast; // Línea corregida previamente
                      rotatedSweepLineStartCoord = rotatedBboxSouth;
                      rotatedSweepLineEndCoord = rotatedBboxNorth;
                      rotatedSweepLineDirection = 0;
