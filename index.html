@@ -65,7 +65,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script src="https://app.unpkg.com/geotiff@1.0.0-beta.6/files/dist/geotiff.js"></script>
+    <script src="https://unpkg.com/geotiff@1.0.0-beta.6/dist/geotiff.js"></script>
 
     <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
@@ -1195,8 +1195,8 @@
 
                  } catch(e) {
                      console.error("Error calculando distancias de la bbox rotada:", e);
-                      alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                     return;
+                       alert("Error calculando límites de la geometría rotada para generar pasadas.");
+                      return;
                  }
 
 
