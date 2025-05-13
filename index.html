@@ -278,31 +278,32 @@
                                    if (feature.geometry.type === 'LineString') {
                                        try {
                                            const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
-                                            if (buffered) {
-                                                if (buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
-                                                     const bufferedFeature = JSON.parse(JSON.stringify(feature));
-                                                     window.exclusionFeatures.push(bufferedFeature); // Usar window.exclusionFeatures
-                                                } else {
-                                                    console.warn("El buffer de LineString no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión:", buffered);
-                                                }
+                                            // *** CORRECCIÓN APLICADA AQUÍ ***
+                                            if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
+                                                 // Clonar la feature bufferizada para evitar referencias.
+                                                 const bufferedFeature = JSON.parse(JSON.stringify(buffered));
+                                                 window.exclusionFeatures.push(bufferedFeature); // Añadir la feature con la geometría del buffer
+                                                  console.log(`LineString de Elementos Internos bufferizado a ${buffered.geometry.type} y añadido como exclusión.`); // Log actualizado
                                             } else {
-                                                console.warn("No se pudo crear buffer para LineString de Elemento Interno. El resultado de turf.buffer fue nulo/undefined. No se usará para recorte:", feature);
+                                                console.warn("El buffer de LineString de Elementos Internos no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión. No se usará para recorte:", buffered);
                                             }
                                        } catch (e) {
-                                            console.error("Error al crear buffer para LineString:", feature, e);
+                                            console.error("Error al crear buffer para LineString de Elementos Internos:", feature, e);
                                             console.warn("Error al crear buffer para LineString de Elemento Interno. No se usará para recorte.");
                                        }
 
                                    } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                                       // Si es un Polígono/MultiPolígono original, añadirlo directamente
                                        const clonedFeature = JSON.parse(JSON.stringify(feature));
                                        window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
+                                        console.log(`Polygon/MultiPolygon de Elementos Internos añadido como exclusión.`); // Log actualizado
                                    } else {
                                         console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) no es LineString, Polígono o MultiPolígono. No se usará para recorte:`, feature.geometry);
                                    }
                                }
                            }
                        }).addTo(map);
-                       overlayLayers["Viales y Arroyos"] = elementosInternosLayer;
+                       overlayLayers["Viales y Arroyos"] = elementosInternosLayer; // Añadido de nuevo al control de capas
                        console.log(`Elementos Internos cargados en Leaflet. Número de features en datos brutos: ${elementosInternosGeojsonData.features.length}.`);
                   } else {
                       console.warn("Datos de Elementos Internos no son un FeatureCollection válido o están vacíos. No se cargarán elementos internos.", elementosInternosGeojsonData);
@@ -460,7 +461,7 @@
                      console.log(`Total features de exclusión cargadas globalmente: ${globalExclusionFeatures.length}`);
                      console.log(`Filtrando features de exclusión para encontrar las que intersectan con la parcela seleccionada.`);
                       globalExclusionFeatures.forEach((exclusionFeature, index) => {
-                          // exclusionFeature ya debe ser un Feature con Polígono/MultiPolígono (buffers si eran LineString)
+                          // exclusionFeature ahora DEBERÍA ser un Feature con Polígono/MultiPolígono (buffers si eran LineString)
                          if (exclusionFeature.geometry && (exclusionFeature.geometry.type === 'Polygon' || exclusionFeature.geometry.type === 'MultiPolygon')) {
                               try {
                                    // Verificar si la feature de exclusión intersecta con la parcela seleccionada
@@ -472,6 +473,7 @@
                                   console.warn(`Error al verificar intersección para feature de exclusión #${index}. Se omitirá.`, exclusionFeature, e);
                               }
                          } else {
+                              // Esta advertencia ya no debería aparecer para los LineStrings si la corrección funcionó
                               console.warn(`Geometría de feature de exclusión #${index} (${exclusionFeature.geometry ? exclusionFeature.geometry.type : 'null/undefined'}) no es Polígono/MultiPolígono válido para intersección. Se omitirá.`, exclusionFeature);
                          }
                       });
@@ -543,7 +545,7 @@
                                             return null;
                                       }
                                   } else {
-                                       console.warn("Simplificación mínima: La feature de exclusión no es Polygon/MultiPolygon. Devolviendo null.");
+                                       console.warn("Simplificación mínima: La feature de exclusión no es Polygon/MultiPolígono. Devolviendo null.");
                                        return null;
                                   }
 
@@ -989,7 +991,7 @@
                     } else {
                         rotationAngle = 90;
                         sweepDirectionInRotatedSpace = 0;
-                        heuristicDirectionDescription = "Bounding Box original más alto que ancho (rotado 90° para pasadas horizontales)";
+                        heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)"; // Log ajustado
                          console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
                     }
                 }
