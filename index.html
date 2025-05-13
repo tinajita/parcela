@@ -52,6 +52,8 @@
     <div class="control-container">
         <label for="workingWidth">Ancho de Trabajo (m):</label>
         <input type="number" id="workingWidth" value="15" min="1">
+        <label for="maxSlope">Pendiente Máx. (%):</label>
+        <input type="number" id="maxSlope" value="40" min="0" max="100">
         <button id="generarPasadasBtn" disabled>Generar Pasadas (Cargando Datos...)</button>
         <div id="loading-status">Cargando datos geoespaciales...</div>
     </div>
@@ -63,7 +65,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist/geotiff.min.js"></script>
+    <script src="https://app.unpkg.com/geotiff@1.0.0-beta.6/files/dist/geotiff.js"></script>
 
     <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
@@ -105,6 +107,7 @@
         const generarPasadasBtn = document.getElementById('generarPasadasBtn');
         const workingWidthInput = document.getElementById('workingWidth');
         const loadingStatusDiv = document.getElementById('loading-status'); // Referencia al indicador de carga
+        const maxSlopeInput = document.getElementById('maxSlope'); // Input para el umbral de pendiente
 
         // --- Capas base ---
         // Capa Minimalista (Se mantiene)
@@ -214,6 +217,11 @@
                        console.log("MDT (TIFF) fetch successful. Status:", response.status);
                        // Parsea el ArrayBuffer del TIFF
                        const arrayBuffer = await response.arrayBuffer();
+                       // Verificar si GeoTIFF está definido antes de usarlo
+                       if (typeof GeoTIFF === 'undefined') {
+                            // Si GeoTIFF no está definido, lanzamos un error claro
+                           throw new Error("GeoTIFF library is not loaded. Cannot parse TIFF. Check the script tag and network.");
+                       }
                        const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
                        const image = await tiff.getImage(); // Generalmente, solo hay una imagen en un GeoTIFF
                        console.log("MDT (TIFF) parsed successfully. Image metadata:", image.getMetadata());
@@ -449,13 +457,13 @@
                        const noDataValue = mdtImage.getGDALNoData(); // Devuelve el valor NoData si está en los tags GDAL
 
                        if (noDataValue !== null && elevation === noDataValue) {
-                            console.warn(`getElevationAtLatLng: Punto [${lng}, ${lat}] cae sobre valor NoData.`);
+                            //console.warn(`getElevationAtLatLng: Punto [${lng}, ${lat}] cae sobre valor NoData.`); // Demasiado ruidoso en consola
                             return null; // O algún otro valor que indique NoData, como NaN
                        }
 
                       return elevation; // Retorna la elevación
                   } else {
-                       console.warn(`getElevationAtLatLng: No se pudo obtener raster para [${lng}, ${lat}].`);
+                       //console.warn(`getElevationAtLatLng: No se pudo obtener raster para [${lng}, ${lat}].`); // Demasiado ruidoso en consola
                        return null;
                   }
 
@@ -472,17 +480,22 @@
                   console.error("calculateSlopePercentage: Input no son puntos Turf.js válidos.");
                    return NaN; // No se puede calcular sin puntos válidos
               }
-               if (point1.properties === undefined || point1.properties.elevation === undefined ||
-                  point2.properties === undefined || point2.properties.elevation === undefined) {
-                    console.warn("calculateSlopePercentage: Los puntos no tienen propiedad 'elevation'.");
-                   return NaN; // No se puede calcular sin elevación
+               if (point1.properties === undefined || point1.properties.elevation === undefined || point1.properties.elevation === null ||
+                  point2.properties === undefined || point2.properties.elevation === undefined || point2.properties.elevation === null) {
+                    //console.warn("calculateSlopePercentage: Uno o ambos puntos no tienen propiedad 'elevation' o es null/undefined."); // Demasiado ruidoso
+                   return NaN; // No se puede calcular sin elevación válida
                }
 
                const horizontalDistance = turf.distance(point1, point2, { units: 'meters' });
                const elevationChange = Math.abs(point2.properties.elevation - point1.properties.elevation);
 
-               if (horizontalDistance === 0) {
-                   return 0; // Si los puntos son el mismo, la pendiente es 0
+               if (horizontalDistance < 0.1) { // Consideramos distancia muy pequeña como pendiente 0 o NaN si elevación cambia bruscamente
+                    // Si la distancia es muy pequeña pero la elevación cambia, puede ser un error en los datos del MDT
+                     if (elevationChange > 0.1) {
+                           //console.warn(`Distancia muy pequeña (${horizontalDistance.toFixed(2)}m) con cambio de elevación (${elevationChange.toFixed(2)}m). Pendiente potencialmente muy alta.`);
+                            return Infinity; // Pendiente casi infinita
+                     }
+                   return 0; // Si la distancia es muy pequeña y la elevación no cambia, la pendiente es 0
                }
 
                const slopeRatio = elevationChange / horizontalDistance;
@@ -503,10 +516,16 @@
                 alert("Error: La biblioteca Turf.js no está disponible. No se pueden generar pasadas. Revisa la consola.");
                 return;
             }
+             console.log("Estado de 'GeoTIFF' al hacer clic en Generar Pasadas:", typeof GeoTIFF);
+             if (typeof GeoTIFF === 'undefined') {
+                 console.error("Error: La biblioteca GeoTIFF.js no se cargó correctamente.");
+                 alert("Error: La biblioteca GeoTIFF.js no está disponible. No se puede calcular la pendiente. Revisa la consola y la etiqueta script.");
+                 return;
+             }
              console.log("Estado de 'mdtGeoTiffImage' al hacer clic en Generar Pasadas:", mdtGeoTiffImage ? 'cargado' : 'no cargado');
              if (!mdtGeoTiffImage) {
-                  console.error("Error: Los datos del MDT (TIFF) no se cargaron correctamente.");
-                 alert("Error: Los datos del MDT no están disponibles. No se puede calcular la pendiente. Revisa la consola.");
+                  console.error("Error: Los datos del MDT (TIFF) no se cargaron y parsearon correctamente."); // Mensaje mejorado
+                 alert("Error: Los datos del MDT no están disponibles. No se puede calcular la pendiente. Espera a que carguen los datos o revisa la consola.");
                   return;
              }
             // --- FIN VERIFICACIÓN ---
@@ -531,15 +550,19 @@
 
             // --- Obtener el ancho de trabajo y el umbral de pendiente ---
             const workingWidth = parseFloat(workingWidthInput.value);
-            // TODO: Añadir un input para el umbral de pendiente y leer su valor aquí
-            const maxSlopePercentage = 40; // Umbral de pendiente fijo por ahora (40%)
+            const maxSlopePercentage = parseFloat(maxSlopeInput.value); // Leer el valor del input de pendiente
 
             if (isNaN(workingWidth) || workingWidth <= 0) {
                  alert("Por favor, introduce un valor válido y positivo para el ancho de trabajo.");
                  console.error("Valor inválido para ancho de trabajo:", workingWidthInput.value);
                  return;
             }
-             // TODO: Validar el umbral de pendiente cuando se añada el input
+             if (isNaN(maxSlopePercentage) || maxSlopePercentage < 0) {
+                  alert("Por favor, introduce un valor válido y no negativo para el umbral de pendiente.");
+                  console.error("Valor inválido para umbral de pendiente:", maxSlopeInput.value);
+                  return;
+             }
+            console.log(`Ancho de trabajo: ${workingWidth}m, Umbral de pendiente: ${maxSlopePercentage}%`);
 
 
             const units = 'meters'; // Unidades para Turf.js
@@ -1178,7 +1201,7 @@
 
 
                let rotatedCurrentOffset = workingWidth / 2;
-               const samplingDistance = 1;
+               const samplingDistance = 1; // Distancia de muestreo a lo largo de cada línea de pasada para verificar la pendiente
                const geometryForPiPCheck = rotatedGeometryForSweepAndPiP;
 
                console.log(`Generando pasadas de ${workingWidth}m en espacio rotado (muestreo de ${samplingDistance}m).`);
@@ -1195,7 +1218,7 @@
                     // Iteramos desde el inicio perpendicularmente a la dirección de barrido
                     const sweepPerpendicularStart = (sweepDirectionInRotatedSpace === 0 ? rotatedBboxSouth : rotatedBboxWest);
                     const sweepPerpendicularEnd = (sweepDirectionInRotatedSpace === 0 ? rotatedBboxNorth : rotatedBboxEast);
-                    const sweepExtent = sweepPerpendicularEnd - sweepPerpendicularStart; // Extensión a lo largo de la cual se generan las pasadas
+                    //const sweepExtent = sweepPerpendicularEnd - sweepPerpendicularStart; // Extensión a lo largo de la cual se generan las pasadas
 
                     // Ajuste para empezar desde el centro de la primera pasada
                     let currentSweepCoord = sweepPerpendicularStart + (workingWidth / 2);
@@ -1220,7 +1243,7 @@
                              continue;
                         }
 
-                        if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
+                         if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
                               console.warn("La línea de barrido completa no es válida (esperado LineString). Saltando esta pasada.");
                               currentSweepCoord += workingWidth;
                               continue;
@@ -1238,6 +1261,7 @@
 
 
                        let currentSegmentPoints = [];
+                       let previousPointWithElevation = null; // Para almacenar el punto anterior con su elevación
 
                        // Muestrear puntos a lo largo de la línea de barrido teórica
                        for (let i = 0; i <= lineLength; i += samplingDistance) {
@@ -1269,54 +1293,61 @@
                                isInsideCleanArea = false;
                            }
 
+                            let elevation = null;
+                            let isSlopeAcceptable = true; // Asumimos aceptable por defecto si no se puede verificar
 
-                           // --- Lógica para verificar pendiente ---
-                           let isSlopeAcceptable = true;
-                           let elevation = null;
+                           // Solo intentar obtener elevación y verificar pendiente si el punto está dentro del área limpia
+                           if (isInsideCleanArea) {
+                                // Obtener elevación para el punto actual
+                               if (mdtGeoTiffImage) {
+                                    // getElevationAtLatLng necesita lat/lng, point.geometry.coordinates es [lng, lat]
+                                    try {
+                                        elevation = await getElevationAtLatLng(point.geometry.coordinates[1], point.geometry.coordinates[0], mdtGeoTiffImage);
 
-                           // Obtener elevación para el punto actual
-                           if (mdtGeoTiffImage) {
-                                // getElevationAtLatLng necesita lat/lng, point.geometry.coordinates es [lng, lat]
-                                try {
-                                    elevation = await getElevationAtLatLng(point.geometry.coordinates[1], point.geometry.coordinates[0], mdtGeoTiffImage);
-                                    // Añadir la elevación a las propiedades del punto para usarla en el cálculo de pendiente
-                                    if (point.properties === null || point.properties === undefined) point.properties = {};
-                                    point.properties.elevation = elevation;
-                                } catch(e) {
-                                     console.warn(`Error obteniendo elevación para punto [${point.geometry.coordinates[0]}, ${point.geometry.coordinates[1]}]`, e);
-                                     // Si no se puede obtener elevación, asumimos que la pendiente no se puede verificar
-                                     isSlopeAcceptable = true; // O false, dependiendo de la política. Asumimos true para no romper la pasada.
-                                     elevation = null; // Asegurarnos de que la elevación sea null/undefined si falla
-                                }
-                           } else {
-                                // Si no hay MDT cargado, no podemos verificar la pendiente
-                                isSlopeAcceptable = true;
-                                console.warn("MDT no cargado, omitiendo verificación de pendiente.");
-                           }
+                                        // Solo calcular pendiente si hay un punto anterior y ambos tienen elevación válida
+                                        if (previousPointWithElevation !== null && elevation !== null) {
+                                             try {
+                                                 const currentTurfPointWithElevation = turf.point(point.geometry.coordinates, { elevation: elevation });
+                                                 const slope = calculateSlopePercentage(previousPointWithElevation, currentTurfPointWithElevation);
+
+                                                 if (isNaN(slope) || slope > maxSlopePercentage) {
+                                                     isSlopeAcceptable = false;
+                                                      //console.log(`Pendiente excesiva (${isNaN(slope) ? 'NaN' : slope.toFixed(2)}%) encontrada entre puntos. Rompiendo pasada.`); // Ruidoso
+                                                 }
+                                             } catch(e) {
+                                                  console.warn("Error durante calculateSlopePercentage. Asumiendo pendiente aceptable.", e);
+                                                  isSlopeAcceptable = true; // No romper pasada por error de cálculo
+                                             }
+                                        }
+                                        // Actualizar el punto anterior con elevación para el siguiente paso
+                                        if (elevation !== null) {
+                                            previousPointWithElevation = turf.point(point.geometry.coordinates, { elevation: elevation });
+                                        } else {
+                                            previousPointWithElevation = null; // Si el punto actual no tiene elevación, reiniciamos el anterior
+                                        }
 
 
-                           // Solo calcular pendiente si hay un punto anterior y ambos tienen elevación
-                           if (currentSegmentPoints.length > 0 && elevation !== null && elevation !== undefined && currentSegmentPoints[currentSegmentPoints.length - 1][2] !== null && currentSegmentPoints[currentSegmentPoints.length - 1][2] !== undefined) {
-                                try {
-                                     const previousPointCoords = currentSegmentPoints[currentSegmentPoints.length - 1];
-                                     const previousPoint = turf.point(previousPointCoords, { elevation: previousPointCoords[2] }); // Crear un punto Turf temporal con elevación
-                                     const currentTurfPoint = turf.point(point.geometry.coordinates, { elevation: elevation });
-
-                                    const slope = calculateSlopePercentage(previousPoint, currentTurfPoint);
-
-                                    if (slope > maxSlopePercentage) {
-                                        isSlopeAcceptable = false;
-                                         console.log(`Pendiente excesiva (${slope.toFixed(2)}%) encontrada entre puntos. Rompiendo pasada.`);
+                                    } catch(e) {
+                                         console.warn(`Error obteniendo elevación para punto [${point.geometry.coordinates[0]}, ${point.geometry.coordinates[1]}]`, e);
+                                         // Si no se puede obtener elevación, no podemos verificar la pendiente para este segmento
+                                         // Tratamos esto como un fin de segmento válido pero sin extender con este punto
+                                         isInsideCleanArea = false; // Forzar la ruptura del segmento
+                                         previousPointWithElevation = null; // Reiniciar el punto anterior
                                     }
-                                } catch(e) {
-                                     console.warn("Error calculando pendiente para segmento. Asumiendo pendiente aceptable.", e);
-                                     isSlopeAcceptable = true; // No romper pasada por error de cálculo
-                                }
+                               } else {
+                                     // Si no hay MDT cargado, no podemos verificar la pendiente
+                                     isSlopeAcceptable = true; // Siempre aceptable si no hay datos de pendiente
+                                     //console.warn("MDT no cargado, omitiendo verificación de pendiente."); // Ruidoso
+                                     previousPointWithElevation = turf.point(point.geometry.coordinates, { elevation: null }); // Guardamos el punto sin elevación
+                               }
+                           } else {
+                                // Si el punto no está dentro del área limpia, forzamos la ruptura del segmento
+                                isSlopeAcceptable = false; // No consideramos la pendiente si el punto está fuera
+                                previousPointWithElevation = null; // Reiniciar el punto anterior
                            }
-                           // --- Fin Lógica para verificar pendiente ---
 
 
-                           // Si el punto está dentro del área limpia Y la pendiente es aceptable
+                           // Si el punto está dentro del área limpia Y la pendiente es aceptable (o no se pudo verificar)
                            if (isInsideCleanArea && isSlopeAcceptable && point && point.geometry && point.geometry.coordinates) {
                                 // Añadir las coordenadas con la elevación (si se obtuvo)
                                 const pointCoordsWithElevation = [
@@ -1339,6 +1370,7 @@
                                }
                                // Reiniciar el segmento actual
                                currentSegmentPoints = [];
+                               // El previousPointWithElevation ya se reseteó o se estableció en null/sin elevación si el punto actual estaba fuera o tuvo error de elevación.
                            }
                        }
 
