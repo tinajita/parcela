@@ -63,6 +63,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist/geotiff.min.js"></script>
+
     <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
         if (typeof turf === 'undefined') {
@@ -70,6 +72,13 @@
         } else {
              console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
         }
+         // Verificar que geotiff.js se cargó
+         console.log("Estado de 'GeoTIFF' inmediatamente después del script tag:", typeof GeoTIFF);
+         if (typeof GeoTIFF === 'undefined') {
+              console.error("VERIFICACIÓN: 'GeoTIFF' es undefined justo después del script tag. El script de GeoTIFF.js NO se cargó o ejecutó como se esperaba.");
+         } else {
+              console.log("VERIFICACIÓN: 'GeoTIFF' parece estar definido. Tipo:", typeof GeoTIFF);
+         }
     </script>
 
 
@@ -87,6 +96,10 @@
         let mdtLayer = null; // Variable para la capa del MDT (aunque no se use para cálculo de pendiente automática)
         window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
+
+        // Variable global para almacenar la imagen GeoTIFF parseada
+        let mdtGeoTiffImage = null;
+
 
         // --- Elementos de la interfaz ---
         const generarPasadasBtn = document.getElementById('generarPasadasBtn');
@@ -176,7 +189,7 @@
              const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
 
             // Usar Promise.all para cargar los archivos concurrentemente
-            // Incluimos el fetch del GeoJSON de curvas de nivel y el TIFF del MDT
+            // Incluimos el fetch del GeoJSON de curvas de nivel y el fetch + parsing del TIFF del MDT
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
                      if (!response.ok) throw new Error(`Error al cargar Parcelas: ${response.statusText}`);
@@ -195,16 +208,22 @@
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
                  }),
-                 // Nueva promesa para intentar cargar el MDT (TIFF) - no se usa para cálculo de pendiente automático en este código
-                 fetch(mdtGeoTiffDataUrl).then(response => {
+                 // *** Modificación aquí: Fetch y parseo del MDT ***
+                 fetch(mdtGeoTiffDataUrl).then(async response => { // Usamos async aquí
                       if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
-                       // Para TIFF, simplemente retornamos la respuesta para saber que se cargó (o no)
                        console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                      return response; // No procesamos el contenido aquí para este código
+                       // Parsea el ArrayBuffer del TIFF
+                       const arrayBuffer = await response.arrayBuffer();
+                       const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+                       const image = await tiff.getImage(); // Generalmente, solo hay una imagen en un GeoTIFF
+                       console.log("MDT (TIFF) parsed successfully. Image metadata:", image.getMetadata());
+                       mdtGeoTiffImage = image; // Almacenar la imagen parseada globalmente
+                       return image; // Retornamos la imagen parseada
                  })
             ])
-            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => { // Añadir los parámetros correspondientes
-                console.log("Los archivos GeoJSON y MDT se cargaron con éxito (primer paso de fetch/json/response).");
+            // Ajustado el .then() para recibir también la imagen del MDT
+            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtImage]) => {
+                console.log("Todos los archivos GeoJSON y el MDT se cargaron y procesaron con éxito (primer paso de fetch/json/response/parse).");
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
                 console.log("Inspeccionando y cargando capa de Parcelas...");
@@ -278,7 +297,7 @@
                                    if (feature.geometry.type === 'LineString') {
                                        try {
                                            const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
-                                            // *** CORRECCIÓN APLICADA AQUÍ ***
+                                            // *** CORRECCIÓN: Añadir el resultado del buffer si es un Polígono/MultiPolígono ***
                                             if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
                                                  // Clonar la feature bufferizada para evitar referencias.
                                                  const bufferedFeature = JSON.parse(JSON.stringify(buffered));
@@ -365,17 +384,13 @@
                  }
                 // --- Fin del código para curvas de nivel ---
 
-                // --- Código para manejar la carga del MDT (TIFF) - No se crea una capa visible por defecto ---
-                 console.log("Intento de carga de MDT (TIFF) completado.");
-                 // Puedes añadir aquí código para procesar el TIFF si tuvieras una librería JS capaz de hacerlo,
-                 // o simplemente usar esta confirmación de carga para saber que el archivo existe en la URL.
-                 if (mdtTiffResponse && mdtTiffResponse.ok) {
-                      console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
-                      // Aquí podrías añadir una capa de TileLayer si tuvieras un servidor sirviendo el MDT como teselas WMS/XYZ
-                      // o usar una librería como geotiff.js para leer el ráster si es necesario para futuros desarrollos de análisis.
+                // --- Código para manejar la carga del MDT (TIFF) y almacenarlo parseado ---
+                 if (mdtImage) { // mdtImage ya viene del Promise.all parseado por geotiff.js
+                      console.log("MDT (TIFF) cargado y parseado globalmente.");
+                       // mdtGeoTiffImage ya está poblada en el .then()
                  } else {
-                      console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
-                       loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar MDT TIFF.';
+                       console.warn("El MDT (TIFF) no se pudo cargar o parsear.");
+                       loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar/procesar MDT TIFF.';
                  }
                 // --- Fin código MDT ---
 
@@ -407,17 +422,93 @@
         });
 
 
+        // --- Función para obtener la elevación de un punto desde la imagen GeoTIFF ---
+        // Esta función necesitará manejar la transformación de coordenadas si el TIFF no está en WGS84
+        async function getElevationAtLatLng(lat, lng, mdtImage) {
+             if (!mdtImage) {
+                 console.warn("getElevationAtLatLng: Imagen MDT no disponible.");
+                 return null; // No se puede obtener elevación sin la imagen
+             }
+
+             try {
+                  // Obtener las coordenadas del pixel para la lat/lng
+                  // Esto asume que geotiff.js puede manejar la transformación si es necesario
+                  // La función readRasters({ coordinates: [...] }) lee por coordenadas geográficas.
+                  // Devuelve un array de rasters (uno por banda) para cada punto.
+                  // El resultado es algo como [[elev_punto1], [elev_punto2], ...] para una banda
+                  const rasters = await mdtImage.readRasters({
+                      coordinates: [[lng, lat]], // Coordenadas [longitude, latitude]
+                      samples: [0] // Asume que la elevación está en la primera banda (banda 0)
+                  });
+
+                  // El resultado para un solo punto y una banda será [[valor]]
+                  if (rasters && rasters.length > 0 && rasters[0] && rasters[0].length > 0) {
+                      const elevation = rasters[0][0]; // El valor de elevación para el primer (y único) punto
+                       // Los valores NoData (generalmente un valor específico como -9999) deben ser manejados.
+                       // Puedes obtener el valor NoData de los tags del TIFF si está definido.
+                       const noDataValue = mdtImage.getGDALNoData(); // Devuelve el valor NoData si está en los tags GDAL
+
+                       if (noDataValue !== null && elevation === noDataValue) {
+                            console.warn(`getElevationAtLatLng: Punto [${lng}, ${lat}] cae sobre valor NoData.`);
+                            return null; // O algún otro valor que indique NoData, como NaN
+                       }
+
+                      return elevation; // Retorna la elevación
+                  } else {
+                       console.warn(`getElevationAtLatLng: No se pudo obtener raster para [${lng}, ${lat}].`);
+                       return null;
+                  }
+
+             } catch (e) {
+                 console.error(`Error obteniendo elevación en [${lng}, ${lat}]`, e);
+                 return null; // En caso de error, no se puede obtener la elevación
+             }
+        }
+
+         // --- Función para calcular la pendiente entre dos puntos (en porcentaje) ---
+         // Puntos deben tener la propiedad 'elevation'
+         function calculateSlopePercentage(point1, point2) {
+              if (!point1 || !point2 || point1.geometry.type !== 'Point' || point2.geometry.type !== 'Point') {
+                  console.error("calculateSlopePercentage: Input no son puntos Turf.js válidos.");
+                   return NaN; // No se puede calcular sin puntos válidos
+              }
+               if (point1.properties === undefined || point1.properties.elevation === undefined ||
+                  point2.properties === undefined || point2.properties.elevation === undefined) {
+                    console.warn("calculateSlopePercentage: Los puntos no tienen propiedad 'elevation'.");
+                   return NaN; // No se puede calcular sin elevación
+               }
+
+               const horizontalDistance = turf.distance(point1, point2, { units: 'meters' });
+               const elevationChange = Math.abs(point2.properties.elevation - point1.properties.elevation);
+
+               if (horizontalDistance === 0) {
+                   return 0; // Si los puntos son el mismo, la pendiente es 0
+               }
+
+               const slopeRatio = elevationChange / horizontalDistance;
+               const slopePercentage = slopeRatio * 100;
+
+               return slopePercentage; // Devuelve la pendiente en porcentaje (ej: 40 para 40%)
+         }
+
+
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS ---
 
-        generarPasadasBtn.addEventListener('click', function() {
+        generarPasadasBtn.addEventListener('click', async function() { // Añadir async aquí
 
-            // --- VERIFICACIÓN DE TURF ---
+            // --- VERIFICACIÓN DE TURF y MDT ---
             console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
             if (typeof turf === 'undefined') {
                 console.error("Error: La biblioteca Turf.js no se cargó correctamente.");
                 alert("Error: La biblioteca Turf.js no está disponible. No se pueden generar pasadas. Revisa la consola.");
                 return;
             }
+             console.log("Estado de 'mdtGeoTiffImage' al hacer clic en Generar Pasadas:", mdtGeoTiffImage ? 'cargado' : 'no cargado');
+             if (!mdtGeoTiffImage) {
+                  console.error("Error: Los datos del MDT (TIFF) no se cargaron correctamente.");
+                 alert("Error: Los datos del MDT no están disponibles. No se puede calcular la pendiente. Revisa la consola.");
+                  return;
+             }
             // --- FIN VERIFICACIÓN ---
 
             console.log("--- Inicio Generación de Pasadas ---");
@@ -438,14 +529,18 @@
             generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores
             console.log("Limpiando pasadas generadas anteriormente.");
 
-            // --- Obtener el ancho de trabajo del input ---
+            // --- Obtener el ancho de trabajo y el umbral de pendiente ---
             const workingWidth = parseFloat(workingWidthInput.value);
+            // TODO: Añadir un input para el umbral de pendiente y leer su valor aquí
+            const maxSlopePercentage = 40; // Umbral de pendiente fijo por ahora (40%)
+
             if (isNaN(workingWidth) || workingWidth <= 0) {
                  alert("Por favor, introduce un valor válido y positivo para el ancho de trabajo.");
                  console.error("Valor inválido para ancho de trabajo:", workingWidthInput.value);
                  return;
             }
-            // --- Fin Obtener ancho de trabajo ---
+             // TODO: Validar el umbral de pendiente cuando se añada el input
+
 
             const units = 'meters'; // Unidades para Turf.js
 
@@ -987,7 +1082,7 @@
                     if (originalBboxWidthMeters >= originalBboxHeightMeters) {
                         rotationAngle = 0;
                         sweepDirectionInRotatedSpace = 0;
-                        heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
+                        heuristicDirectionDescription = "Bounding Box más ancho que alto (o igual)"; // Log ajustado
                     } else {
                         rotationAngle = 90;
                         sweepDirectionInRotatedSpace = 0;
@@ -1096,49 +1191,38 @@
                    alert("Ancho de trabajo inválido o área a barrer muy pequeña.");
                    return;
                } else {
-                    const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
-                    while (rotatedCurrentOffset <= sweepLimit ) {
+                    // Bucle principal para generar líneas de pasada teóricas en el espacio rotado
+                    // Iteramos desde el inicio perpendicularmente a la dirección de barrido
+                    const sweepPerpendicularStart = (sweepDirectionInRotatedSpace === 0 ? rotatedBboxSouth : rotatedBboxWest);
+                    const sweepPerpendicularEnd = (sweepDirectionInRotatedSpace === 0 ? rotatedBboxNorth : rotatedBboxEast);
+                    const sweepExtent = sweepPerpendicularEnd - sweepPerpendicularStart; // Extensión a lo largo de la cual se generan las pasadas
 
-                       let pointOnSweepAxis = null;
-                        try {
-                            pointOnSweepAxis = turf.destination(
-                                turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                                rotatedCurrentOffset / 1000,
-                                sweepDirectionInRotatedSpace,
-                                {units: 'kilometers'}
-                            );
-                        } catch(e) {
-                            console.error("Error en turf.destination al calcular punto en eje de barrido:", e);
-                            rotatedCurrentOffset += workingWidth;
-                            continue;
-                        }
+                    // Ajuste para empezar desde el centro de la primera pasada
+                    let currentSweepCoord = sweepPerpendicularStart + (workingWidth / 2);
 
-                        if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
-                             console.warn("turf.destination devolvió un punto inválido. Saltando esta pasada.");
-                             rotatedCurrentOffset += workingWidth;
-                             continue;
-                        }
+                    while (currentSweepCoord <= sweepPerpendicularEnd) { // Corregido el límite del bucle
 
-
-                       let passCenterCoord = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
-
+                       let startPointCoords, endPointCoords;
+                       if (sweepDirectionInRotatedSpace === 0) { // Pasadas horizontales en espacio rotado
+                            startPointCoords = [rotatedBboxWest, currentSweepCoord];
+                            endPointCoords = [rotatedBboxEast, currentSweepCoord];
+                       } else { // Pasadas verticales en espacio rotado
+                           startPointCoords = [currentSweepCoord, rotatedBboxSouth];
+                           endPointCoords = [currentSweepCoord, rotatedBboxNorth];
+                       }
 
                        let fullSweepLineInRotatedSpace = null;
                         try {
-                           if (sweepDirectionInRotatedSpace === 0) {
-                                fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
-                           } else {
-                                fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
-                           }
+                            fullSweepLineInRotatedSpace = turf.lineString([startPointCoords, endPointCoords]);
                         } catch(e) {
-                             console.error("Error en turf.lineString al crear línea de barrido completa:", e);
-                            rotatedCurrentOffset += workingWidth;
-                            continue;
+                             console.error("Error en turf.lineString al crear línea de barrido completa en espacio rotado:", e);
+                             currentSweepCoord += workingWidth;
+                             continue;
                         }
 
-                         if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
+                        if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
                               console.warn("La línea de barrido completa no es válida (esperado LineString). Saltando esta pasada.");
-                              rotatedCurrentOffset += workingWidth;
+                              currentSweepCoord += workingWidth;
                               continue;
                          }
 
@@ -1148,13 +1232,14 @@
                              lineLength = turf.length(fullSweepLineInRotatedSpace, {units: units});
                         } catch(e) {
                              console.error("Error en turf.length al calcular longitud de línea de barrido:", e);
-                            rotatedCurrentOffset += workingWidth;
+                            currentSweepCoord += workingWidth;
                             continue;
                         }
 
 
                        let currentSegmentPoints = [];
 
+                       // Muestrear puntos a lo largo de la línea de barrido teórica
                        for (let i = 0; i <= lineLength; i += samplingDistance) {
                            let point = null;
                            try {
@@ -1169,49 +1254,110 @@
                                 continue;
                            }
 
-
-                           let isInside = false;
+                           // Verificar si el punto muestreado está dentro de la geometría limpia (parcela - exclusiones)
+                           let isInsideCleanArea = false;
                            if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
                                try {
-                                   isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
+                                   isInsideCleanArea = turf.booleanPointInPolygon(point, geometryForPiPCheck);
                                } catch(e) {
                                    console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
-                                   isInside = false;
+                                   isInsideCleanArea = false;
                                }
                            } else {
+                               // Esto no debería ocurrir si la lógica anterior fue correcta
                                console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
-                               isInside = false;
+                               isInsideCleanArea = false;
                            }
 
 
-                           if (isInside && point && point.geometry && point.geometry.coordinates) {
-                               currentSegmentPoints.push(point.geometry.coordinates);
+                           // --- Lógica para verificar pendiente ---
+                           let isSlopeAcceptable = true;
+                           let elevation = null;
+
+                           // Obtener elevación para el punto actual
+                           if (mdtGeoTiffImage) {
+                                // getElevationAtLatLng necesita lat/lng, point.geometry.coordinates es [lng, lat]
+                                try {
+                                    elevation = await getElevationAtLatLng(point.geometry.coordinates[1], point.geometry.coordinates[0], mdtGeoTiffImage);
+                                    // Añadir la elevación a las propiedades del punto para usarla en el cálculo de pendiente
+                                    if (point.properties === null || point.properties === undefined) point.properties = {};
+                                    point.properties.elevation = elevation;
+                                } catch(e) {
+                                     console.warn(`Error obteniendo elevación para punto [${point.geometry.coordinates[0]}, ${point.geometry.coordinates[1]}]`, e);
+                                     // Si no se puede obtener elevación, asumimos que la pendiente no se puede verificar
+                                     isSlopeAcceptable = true; // O false, dependiendo de la política. Asumimos true para no romper la pasada.
+                                     elevation = null; // Asegurarnos de que la elevación sea null/undefined si falla
+                                }
                            } else {
+                                // Si no hay MDT cargado, no podemos verificar la pendiente
+                                isSlopeAcceptable = true;
+                                console.warn("MDT no cargado, omitiendo verificación de pendiente.");
+                           }
+
+
+                           // Solo calcular pendiente si hay un punto anterior y ambos tienen elevación
+                           if (currentSegmentPoints.length > 0 && elevation !== null && elevation !== undefined && currentSegmentPoints[currentSegmentPoints.length - 1][2] !== null && currentSegmentPoints[currentSegmentPoints.length - 1][2] !== undefined) {
+                                try {
+                                     const previousPointCoords = currentSegmentPoints[currentSegmentPoints.length - 1];
+                                     const previousPoint = turf.point(previousPointCoords, { elevation: previousPointCoords[2] }); // Crear un punto Turf temporal con elevación
+                                     const currentTurfPoint = turf.point(point.geometry.coordinates, { elevation: elevation });
+
+                                    const slope = calculateSlopePercentage(previousPoint, currentTurfPoint);
+
+                                    if (slope > maxSlopePercentage) {
+                                        isSlopeAcceptable = false;
+                                         console.log(`Pendiente excesiva (${slope.toFixed(2)}%) encontrada entre puntos. Rompiendo pasada.`);
+                                    }
+                                } catch(e) {
+                                     console.warn("Error calculando pendiente para segmento. Asumiendo pendiente aceptable.", e);
+                                     isSlopeAcceptable = true; // No romper pasada por error de cálculo
+                                }
+                           }
+                           // --- Fin Lógica para verificar pendiente ---
+
+
+                           // Si el punto está dentro del área limpia Y la pendiente es aceptable
+                           if (isInsideCleanArea && isSlopeAcceptable && point && point.geometry && point.geometry.coordinates) {
+                                // Añadir las coordenadas con la elevación (si se obtuvo)
+                                const pointCoordsWithElevation = [
+                                     point.geometry.coordinates[0],
+                                     point.geometry.coordinates[1],
+                                     elevation // Añadir la elevación como tercera coordenada (o undefined/null si no se obtuvo)
+                                ];
+                               currentSegmentPoints.push(pointCoordsWithElevation);
+
+                           } else {
+                               // Si el punto no está dentro del área limpia O la pendiente no es aceptable
+                               // Terminamos el segmento actual si tiene al menos 2 puntos
                                if (currentSegmentPoints.length > 1) {
                                     try {
+                                        // Crear LineString del segmento válido
                                         generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                                     } catch(e) {
-                                        console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
+                                        console.error("Error en turf.lineString al crear segmento de pasada rotada (fin de segmento).", e);
                                     }
                                }
+                               // Reiniciar el segmento actual
                                currentSegmentPoints = [];
                            }
                        }
 
+                       // Después de salir del bucle de muestreo, si el último segmento tiene puntos, añadirlo
                        if (currentSegmentPoints.length > 1) {
                             try {
                                 generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                            } catch(e) {
-                                console.error("Error en turf.lineString al crear segmento final de pasada rotada:", e);
+                                console.error("Error en turf.lineString al crear segmento final de pasada rotada.", e);
                            }
                        }
 
-                       rotatedCurrentOffset += workingWidth;
+                       // Avanzar a la siguiente pasada
+                       currentSweepCoord += workingWidth; // Avanzar el ancho de trabajo completo
                    }
                }
 
 
-               console.log(`Generadas ${generatedRotatedPasses.length} pasadas (segmentos de LineString) en el espacio rotado.`);
+               console.log(`Generadas ${generatedRotatedPasses.length} segmentos de pasadas válidas (respetando exclusiones y pendiente) en el espacio rotado.`);
 
                console.log(`Rotando pasadas de vuelta por ${-rotationAngle.toFixed(2)} grados.`);
                generatedRotatedPasses.forEach((rotatedPass, index) => {
@@ -1221,7 +1367,10 @@
                                  console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
                                  return;
                              }
+                             // Rotar la geometría de la pasada
                              const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
+
+                             // Crear una feature con la geometría rotada y añadirla a la capa de pasadas generadas
                              L.geoJSON(originalPassGeometry, {
                                  style: { color: '#800080', weight: 2 }
                              }).addTo(generatedPassesLayer);
@@ -1234,7 +1383,7 @@
                    }
                });
 
-               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
+               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar y por pendiente) finalizada.");
                 console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
