@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial="viewport", initial-scale=1.0">
     <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
@@ -1260,6 +1260,7 @@
                             continue;
                         }
 
+                       console.log(`  Procesando línea de pasada teórica a coordenada perpendicular ${currentSweepCoord.toFixed(2)}m. Longitud: ${lineLength.toFixed(2)}m.`);
 
                        let currentSegmentPoints = [];
                        let previousPointWithElevation = null; // Para almacenar el punto anterior con su elevación
@@ -1269,13 +1270,14 @@
                            let point = null;
                            try {
                                point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
+                               console.log(`    Muestreando punto a ${i.toFixed(2)}m: [${point.geometry.coordinates[0].toFixed(6)}, ${point.geometry.coordinates[1].toFixed(6)}]`);
                            } catch(e) {
-                               console.warn("Error en turf.along al muestrear punto.", i, e);
+                               console.warn("    Error en turf.along al muestrear punto.", i, e);
                                continue;
                            }
 
                            if (!point || !point.geometry || !point.geometry.coordinates) {
-                                console.warn(`turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
+                                console.warn(`    turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
                                 continue;
                            }
 
@@ -1284,13 +1286,14 @@
                            if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
                                try {
                                    isInsideCleanArea = turf.booleanPointInPolygon(point, geometryForPiPCheck);
+                                    console.log(`    Punto dentro del área limpia?: ${isInsideCleanArea}`);
                                } catch(e) {
-                                   console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
+                                   console.warn("    Error durante booleanPointInPolygon para punto en muestreo.", point, e);
                                    isInsideCleanArea = false;
                                }
                            } else {
                                // Esto no debería ocurrir si la lógica anterior fue correcta
-                               console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
+                               console.error("    La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
                                isInsideCleanArea = false;
                            }
 
@@ -1304,70 +1307,93 @@
                                     // getElevationAtLatLng necesita lat/lng, point.geometry.coordinates es [lng, lat]
                                     try {
                                         elevation = await getElevationAtLatLng(point.geometry.coordinates[1], point.geometry.coordinates[0], mdtGeoTiffImage);
+                                        console.log(`    Elevación obtenida: ${elevation !== null ? elevation.toFixed(2) : 'NoData/Error'}`);
 
                                         // Solo calcular pendiente si hay un punto anterior y ambos tienen elevación válida
                                         if (previousPointWithElevation !== null && elevation !== null) {
                                              try {
                                                  const currentTurfPointWithElevation = turf.point(point.geometry.coordinates, { elevation: elevation });
                                                  const slope = calculateSlopePercentage(previousPointWithElevation, currentTurfPointWithElevation);
+                                                 console.log(`    Pendiente calculada con punto anterior (${previousPointWithElevation.geometry.coordinates[1].toFixed(6)}, ${previousPointWithElevation.geometry.coordinates[0].toFixed(6)}, ${previousPointWithElevation.properties.elevation !== null ? previousPointWithElevation.properties.elevation.toFixed(2) : 'null'}): ${isNaN(slope) ? 'NaN' : slope.toFixed(2)}%, Umbral: ${maxSlopePercentage}%`);
+
 
                                                  if (isNaN(slope) || slope > maxSlopePercentage) {
                                                      isSlopeAcceptable = false;
-                                                      //console.log(`Pendiente excesiva (${isNaN(slope) ? 'NaN' : slope.toFixed(2)}%) encontrada entre puntos. Rompiendo pasada.`); // Ruidoso
+                                                      console.log(`    Pendiente NO aceptable. Rompiendo segmento.`);
+                                                 } else {
+                                                     console.log(`    Pendiente aceptable.`);
                                                  }
                                              } catch(e) {
-                                                  console.warn("Error durante calculateSlopePercentage. Asumiendo pendiente aceptable.", e);
+                                                  console.warn("    Error durante calculateSlopePercentage. Asumiendo pendiente aceptable.", e);
                                                   isSlopeAcceptable = true; // No romper pasada por error de cálculo
                                              }
+                                        } else if (previousPointWithElevation === null && elevation !== null) {
+                                             console.log(`    Primer punto con elevación en este segmento. No se calcula pendiente todavía.`);
+                                        } else if (elevation === null) {
+                                            console.log(`    Elevación es NoData o hubo error al obtenerla. No se puede calcular pendiente.`);
                                         }
+
                                         // Actualizar el punto anterior con elevación para el siguiente paso
                                         if (elevation !== null) {
                                             previousPointWithElevation = turf.point(point.geometry.coordinates, { elevation: elevation });
                                         } else {
-                                            previousPointWithElevation = null; // Si el punto actual no tiene elevación, reiniciamos el anterior
+                                            // Si el punto actual no tiene elevación válida, reiniciamos el punto anterior para el cálculo de pendiente
+                                            previousPointWithElevation = null;
+                                            console.log(`    Punto actual sin elevación válida. Reiniciando previousPointWithElevation.`);
                                         }
 
 
                                     } catch(e) {
-                                         console.warn(`Error obteniendo elevación para punto [${point.geometry.coordinates[0]}, ${point.geometry.coordinates[1]}]`, e);
+                                         console.warn(`    Error general obteniendo elevación para punto [${point.geometry.coordinates[0]}, ${point.geometry.coordinates[1]}]`, e);
                                          // Si no se puede obtener elevación, no podemos verificar la pendiente para este segmento
                                          // Tratamos esto como un fin de segmento válido pero sin extender con este punto
                                          isInsideCleanArea = false; // Forzar la ruptura del segmento
                                          previousPointWithElevation = null; // Reiniciar el punto anterior
+                                         console.log(`    Error general al obtener elevación. Forzando ruptura de segmento.`);
                                     }
                                } else {
                                      // Si no hay MDT cargado, no podemos verificar la pendiente
                                      isSlopeAcceptable = true; // Siempre aceptable si no hay datos de pendiente
-                                     //console.warn("MDT no cargado, omitiendo verificación de pendiente."); // Ruidoso
+                                     console.warn("    MDT no cargado, omitiendo verificación de pendiente.");
                                      previousPointWithElevation = turf.point(point.geometry.coordinates, { elevation: null }); // Guardamos el punto sin elevación
                                }
                            } else {
                                 // Si el punto no está dentro del área limpia, forzamos la ruptura del segmento
                                 isSlopeAcceptable = false; // No consideramos la pendiente si el punto está fuera
                                 previousPointWithElevation = null; // Reiniciar el punto anterior
+                                console.log(`    Punto fuera del área limpia. Forzando ruptura de segmento.`);
                            }
 
 
                            // Si el punto está dentro del área limpia Y la pendiente es aceptable (o no se pudo verificar)
                            if (isInsideCleanArea && isSlopeAcceptable && point && point.geometry && point.geometry.coordinates) {
                                 // Añadir las coordenadas con la elevación (si se obtuvo)
+                                // Nota: La elevación como 3ra coordenada es opcional, solo se usa para referencia si se necesita en el futuro
+                                // Turf.js y Leaflet principalmente usan [lng, lat] o [lat, lng]
                                 const pointCoordsWithElevation = [
                                      point.geometry.coordinates[0],
                                      point.geometry.coordinates[1],
                                      elevation // Añadir la elevación como tercera coordenada (o undefined/null si no se obtuvo)
                                 ];
                                currentSegmentPoints.push(pointCoordsWithElevation);
+                               console.log(`    Punto añadido a currentSegmentPoints. Tamaño actual: ${currentSegmentPoints.length}`);
 
                            } else {
                                // Si el punto no está dentro del área limpia O la pendiente no es aceptable
                                // Terminamos el segmento actual si tiene al menos 2 puntos
+                               console.log(`    Punto NO añadido a currentSegmentPoints (isInsideCleanArea: ${isInsideCleanArea}, isSlopeAcceptable: ${isSlopeAcceptable}).`);
                                if (currentSegmentPoints.length > 1) {
                                     try {
                                         // Crear LineString del segmento válido
+                                        console.log(`    Segmento de ${currentSegmentPoints.length} puntos finalizado. Añadiendo a generatedRotatedPasses.`);
                                         generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                                     } catch(e) {
-                                        console.error("Error en turf.lineString al crear segmento de pasada rotada (fin de segmento).", e);
+                                        console.error("    Error en turf.lineString al crear segmento de pasada rotada (fin de segmento).", e);
                                     }
+                               } else if (currentSegmentPoints.length === 1) {
+                                   console.log(`    Segmento finalizado con solo 1 punto. Descartando.`);
+                               } else {
+                                    console.log(`    Segmento finalizado con 0 puntos. Nada que añadir.`);
                                }
                                // Reiniciar el segmento actual
                                currentSegmentPoints = [];
@@ -1375,17 +1401,23 @@
                            }
                        }
 
-                       // Después de salir del bucle de muestreo, si el último segmento tiene puntos, añadirlo
+                       // Después de salir del bucle de muestreo (fin de la línea teórica), si el último segmento tiene puntos, añadirlo
                        if (currentSegmentPoints.length > 1) {
                             try {
+                                console.log(`  Fin de línea teórica. Último segmento tiene ${currentSegmentPoints.length} puntos. Añadiendo a generatedRotatedPasses.`);
                                 generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                            } catch(e) {
-                                console.error("Error en turf.lineString al crear segmento final de pasada rotada.", e);
+                                console.error("  Error en turf.lineString al crear segmento final de pasada rotada.", e);
                            }
+                       } else if (currentSegmentPoints.length === 1) {
+                            console.log(`  Fin de línea teórica. Último segmento tiene solo 1 punto. Descartando.`);
+                       } else {
+                             console.log(`  Fin de línea teórica. Último segmento tiene 0 puntos. Nada que añadir.`);
                        }
 
                        // Avanzar a la siguiente pasada
                        currentSweepCoord += workingWidth; // Avanzar el ancho de trabajo completo
+                    console.log(`  Avanzando a la siguiente línea de pasada teórica a coordenada perpendicular ${currentSweepCoord.toFixed(2)}m.`);
                    }
                }
 
