@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial="viewport", initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
@@ -224,7 +224,7 @@
                        }
                        const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
                        const image = await tiff.getImage(); // Generalmente, solo hay una imagen en un GeoTIFF
-                       // CORRECCIÓN: Acceder a la metadata a través de la propiedad fileDirectory en v2.1.3
+                       // Acceder a la metadata a través de la propiedad fileDirectory en v2.1.3
                        console.log("MDT (TIFF) parsed successfully. Image metadata:", image.fileDirectory);
                        mdtGeoTiffImage = image; // Almacenar la imagen parseada globalmente
                        return image; // Retornamos la imagen parseada
