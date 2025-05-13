@@ -52,8 +52,6 @@
     <div class="control-container">
         <label for="workingWidth">Ancho de Trabajo (m):</label>
         <input type="number" id="workingWidth" value="15" min="1">
-        <label for="maxSlope">Pendiente Máx. (%) (Solo Referencia en esta versión):</label>
-        <input type="number" id="maxSlope" value="40" min="0" max="100">
         <button id="generarPasadasBtn" disabled>Generar Pasadas (Cargando Datos...)</button>
         <div id="loading-status">Cargando datos geoespaciales...</div>
     </div>
@@ -65,8 +63,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
-
     <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
         if (typeof turf === 'undefined') {
@@ -74,13 +70,6 @@
         } else {
              console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
         }
-         // Verificar que geotiff.js se cargó
-         console.log("Estado de 'GeoTIFF' inmediatamente después del script tag:", typeof GeoTIFF);
-         if (typeof GeoTIFF === 'undefined') {
-              console.error("VERIFICACIÓN: 'GeoTIFF' es undefined justo después del script tag. El script de GeoTIFF.js NO se cargó o ejecutó como se esperaba.");
-         } else {
-              console.log("VERIFICACIÓN: 'GeoTIFF' parece estar definido. Tipo:", typeof GeoTIFF);
-         }
     </script>
 
 
@@ -99,15 +88,10 @@
         window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
-        // Variable global para almacenar la imagen GeoTIFF parseada
-        let mdtGeoTiffImage = null;
-
-
         // --- Elementos de la interfaz ---
         const generarPasadasBtn = document.getElementById('generarPasadasBtn');
         const workingWidthInput = document.getElementById('workingWidth');
         const loadingStatusDiv = document.getElementById('loading-status'); // Referencia al indicador de carga
-        const maxSlopeInput = document.getElementById('maxSlope'); // Input para el umbral de pendiente
 
         // --- Capas base ---
         // Capa Minimalista (Se mantiene)
@@ -192,7 +176,7 @@
              const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
 
             // Usar Promise.all para cargar los archivos concurrentemente
-            // Incluimos el fetch del GeoJSON de curvas de nivel y el fetch + parsing del TIFF del MDT
+            // Incluimos el fetch del GeoJSON de curvas de nivel y el TIFF del MDT
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
                      if (!response.ok) throw new Error(`Error al cargar Parcelas: ${response.statusText}`);
@@ -211,28 +195,16 @@
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
                  }),
-                 // *** Modificación aquí: Fetch y parseo del MDT ***
-                 fetch(mdtGeoTiffDataUrl).then(async response => { // Usamos async aquí
+                 // Nueva promesa para intentar cargar el MDT (TIFF) - no se usa para cálculo de pendiente automático en este código
+                 fetch(mdtGeoTiffDataUrl).then(response => {
                       if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
+                       // Para TIFF, simplemente retornamos la respuesta para saber que se cargó (o no)
                        console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                       // Parsea el ArrayBuffer del TIFF
-                       const arrayBuffer = await response.arrayBuffer();
-                       // Verificar si GeoTIFF está definido antes de usarlo
-                       if (typeof GeoTIFF === 'undefined') {
-                            // Si GeoTIFF no está definido, lanzamos un error claro
-                           throw new Error("GeoTIFF library is not loaded. Cannot parse TIFF. Check the script tag and network.");
-                       }
-                       const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
-                       const image = await tiff.getImage(); // Generalmente, solo hay una imagen en un GeoTIFF
-                       // Acceder a la metadata a través de la propiedad fileDirectory en v2.1.3
-                       console.log("MDT (TIFF) parsed successfully. Image metadata:", image.fileDirectory);
-                       mdtGeoTiffImage = image; // Almacenar la imagen parseada globalmente
-                       return image; // Retornamos la imagen parseada
+                      return response; // No procesamos el contenido aquí para este código
                  })
             ])
-            // Ajustado el .then() para recibir también la imagen del MDT
-            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtImage]) => {
-                console.log("Todos los archivos GeoJSON y el MDT se cargaron y procesaron con éxito (primer paso de fetch/json/response/parse).");
+            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => { // Añadir los parámetros correspondientes
+                console.log("Los archivos GeoJSON y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
                 console.log("Inspeccionando y cargando capa de Parcelas...");
@@ -273,6 +245,7 @@
                       construccionesLayer = L.geoJSON(construccionesGeojsonData, {
                           style: feature => ({ color: '#FF0000', weight: 2, fillColor: '#FF0000', fillOpacity: 0.5 }),
                            onEachFeature: (feature, layer) => {
+                               // En esta versión original, solo se consideraban Polygons/MultiPolygons de CONSTRU
                                if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
                                   const clonedFeature = JSON.parse(JSON.stringify(feature));
                                    window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
@@ -302,33 +275,9 @@
                                 return { color: '#888888', weight: 1, opacity: 0.5 };
                            },
                            onEachFeature: (feature, layer) => {
-                               if (feature.geometry) {
-                                   if (feature.geometry.type === 'LineString') {
-                                       try {
-                                           const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
-                                            // *** CORRECCIÓN: Añadir el resultado del buffer si es un Polígono/MultiPolígono ***
-                                            if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
-                                                 // Clonar la feature bufferizada para evitar referencias.
-                                                 const bufferedFeature = JSON.parse(JSON.stringify(buffered));
-                                                 window.exclusionFeatures.push(bufferedFeature); // Añadir la feature con la geometría del buffer
-                                                  console.log(`LineString de Elementos Internos bufferizado a ${buffered.geometry.type} y añadido como exclusión.`); // Log actualizado
-                                            } else {
-                                                console.warn("El buffer de LineString de Elementos Internos no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión. No se usará para recorte:", buffered);
-                                            }
-                                       } catch (e) {
-                                            console.error("Error al crear buffer para LineString de Elementos Internos:", feature, e);
-                                            console.warn("Error al crear buffer para LineString de Elemento Interno. No se usará para recorte.");
-                                       }
-
-                                   } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
-                                       // Si es un Polígono/MultiPolígono original, añadirlo directamente
-                                       const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                       window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
-                                        console.log(`Polygon/MultiPolygon de Elementos Internos añadido como exclusión.`); // Log actualizado
-                                   } else {
-                                        console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) no es LineString, Polígono o MultiPolígono. No se usará para recorte:`, feature.geometry);
-                                   }
-                               }
+                               // En esta versión original, no se usaban las geometrías de ELEMLIN para exclusión
+                               // La lógica para buffer y añadir a exclusionFeatures se añadió después
+                               console.log(`Elemento Interno (${feature.geometry ? feature.geometry.type : 'null/undefined'}). No se usará para exclusión en esta versión base.`);
                            }
                        }).addTo(map);
                        overlayLayers["Viales y Arroyos"] = elementosInternosLayer; // Añadido de nuevo al control de capas
@@ -393,18 +342,22 @@
                  }
                 // --- Fin del código para curvas de nivel ---
 
-                // --- Código para manejar la carga del MDT (TIFF) y almacenarlo parseado ---
-                 if (mdtImage) { // mdtImage ya viene del Promise.all parseado por geotiff.js
-                      console.log("MDT (TIFF) cargado y parseado globalmente.");
-                       // mdtGeoTiffImage ya está poblada en el .then()
+                // --- Código para manejar la carga del MDT (TIFF) - No se crea una capa visible por defecto ---
+                 console.log("Intento de carga de MDT (TIFF) completado.");
+                 // Puedes añadir aquí código para procesar el TIFF si tuvieras una librería JS capaz de hacerlo,
+                 // o simplemente usar esta confirmación de carga para saber que el archivo existe en la URL.
+                 if (mdtTiffResponse && mdtTiffResponse.ok) {
+                      console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
+                      // Aquí podrías añadir una capa de TileLayer si tuvieras un servidor sirviendo el MDT como teselas WMS/XYZ
+                      // o usar una librería como geotiff.js para leer el ráster si es necesario para futuros desarrollos de análisis.
                  } else {
-                       console.warn("Advertencia: El MDT (TIFF) no se pudo cargar o parsear. La verificación de pendiente será omitida."); // Advertencia en lugar de error fatal
-                       loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar/procesar MDT TIFF. Se omitirá verificación de pendiente.';
+                      console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
+                       loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar MDT TIFF.';
                  }
                 // --- Fin código MDT ---
 
 
-                 console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos: ${window.exclusionFeatures.length}`);
+                 console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos (solo Polígonos/MultiPolígonos de Construcciones en esta versión base): ${window.exclusionFeatures.length}`);
                  console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures);
 
 
@@ -431,105 +384,17 @@
         });
 
 
-        // --- Función para obtener la elevación de un punto desde la imagen GeoTIFF ---
-        // Esta función necesitará manejar la transformación de coordenadas si el TIFF no está en WGS84
-        async function getElevationAtLatLng(lat, lng, mdtImage) {
-             if (!mdtImage) {
-                 console.warn("getElevationAtLatLng: Imagen MDT no disponible.");
-                 return null; // No se puede obtener elevación sin la imagen
-             }
-
-             try {
-                  // Obtener las coordenadas del pixel para la lat/lng
-                  // Esto asume que geotiff.js puede manejar la transformación si es necesario
-                  // La función readRasters({ coordinates: [...] }) lee por coordenadas geográficas.
-                  // Devuelve un array de rasters (uno por banda) para cada punto.
-                  // El resultado es algo como [[elev_punto1], [elev_punto2], ...] para una banda
-                  const rasters = await mdtImage.readRasters({
-                      coordinates: [[lng, lat]], // Coordenadas [longitude, latitude]
-                      samples: [0] // Asume que la elevación está en la primera banda (banda 0)
-                  });
-
-                  // El resultado para un solo punto y una banda será [[valor]]
-                  if (rasters && rasters.length > 0 && rasters[0] && rasters[0].length > 0) {
-                      const elevation = rasters[0][0]; // El valor de elevación para el primer (y único) punto
-                       // Los valores NoData (generalmente un valor específico como -9999) deben ser manejados.
-                       // Puedes obtener el valor NoData de los tags del TIFF si está definido.
-                       const noDataValue = mdtImage.getGDALNoData(); // Devuelve el valor NoData si está en los tags GDAL
-
-                       if (noDataValue !== null && elevation === noDataValue) {
-                            //console.warn(`getElevationAtLatLng: Punto [${lng}, ${lat}] cae sobre valor NoData.`); // Demasiado ruidoso en consola
-                            return null; // O algún otro valor que indique NoData, como NaN
-                       }
-
-                      return elevation; // Retorna la elevación
-                  } else {
-                       //console.warn(`getElevationAtLatLng: No se pudo obtener raster para [${lng}, ${lat}].`); // Demasiado ruidoso en consola
-                       return null;
-                  }
-
-             } catch (e) {
-                 console.error(`Error obteniendo elevación en [${lng}, ${lat}]`, e);
-                 return null; // En caso de error, no se puede obtener la elevación
-             }
-        }
-
-         // --- Función para calcular la pendiente entre dos puntos (en porcentaje) ---
-         // Puntos deben tener la propiedad 'elevation'
-         function calculateSlopePercentage(point1, point2) {
-              if (!point1 || !point2 || point1.geometry.type !== 'Point' || point2.geometry.type !== 'Point') {
-                  console.error("calculateSlopePercentage: Input no son puntos Turf.js válidos.");
-                   return NaN; // No se puede calcular sin puntos válidos
-              }
-               if (point1.properties === undefined || point1.properties.elevation === undefined || point1.properties.elevation === null ||
-                  point2.properties === undefined || point2.properties.elevation === undefined || point2.properties.elevation === null) {
-                    //console.warn("calculateSlopePercentage: Uno o ambos puntos no tienen propiedad 'elevation' o es null/undefined."); // Demasiado ruidoso
-                   return NaN; // No se puede calcular sin elevación válida
-               }
-
-               const horizontalDistance = turf.distance(point1, point2, { units: 'meters' });
-               const elevationChange = Math.abs(point2.properties.elevation - point1.properties.elevation);
-
-               if (horizontalDistance < 0.1) { // Consideramos distancia muy pequeña como pendiente 0 o NaN si elevación cambia bruscamente
-                    // Si la distancia es muy pequeña pero la elevación cambia, puede ser un error en los datos del MDT
-                     if (elevationChange > 0.1) {
-                           console.warn(`Distancia muy pequeña (${horizontalDistance.toFixed(2)}m) con cambio de elevación (${elevationChange.toFixed(2)}m). Pendiente potencialmente muy alta.`);
-                            return Infinity; // Pendiente casi infinita
-                     }
-                   return 0; // Si la distancia es muy pequeña y la elevación no cambia, la pendiente es 0
-               }
-
-               const slopeRatio = elevationChange / horizontalDistance;
-               const slopePercentage = slopeRatio * 100;
-
-               return slopePercentage; // Devuelve la pendiente en porcentaje (ej: 40 para 40%)
-         }
-
-
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS ---
 
-        generarPasadasBtn.addEventListener('click', async function() { // Añadir async aquí
+        generarPasadasBtn.addEventListener('click', function() {
 
-            // --- VERIFICACIÓN DE TURF y MDT ---
+            // --- VERIFICACIÓN DE TURF ---
             console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
             if (typeof turf === 'undefined') {
                 console.error("Error: La biblioteca Turf.js no se cargó correctamente.");
                 alert("Error: La biblioteca Turf.js no está disponible. No se pueden generar pasadas. Revisa la consola.");
                 return;
             }
-             console.log("Estado de 'GeoTIFF' al hacer clic en Generar Pasadas:", typeof GeoTIFF);
-             if (typeof GeoTIFF === 'undefined') {
-                 console.error("Error: La biblioteca GeoTIFF.js no se cargó correctamente.");
-                 alert("Error: La biblioteca GeoTIFF.js no está disponible. No se puede calcular la pendiente. Revisa la consola y la etiqueta script.");
-                 // Permitimos continuar, pero la verificación de pendiente no funcionará.
-                 // return; // No retornamos aquí para permitir generar pasadas sin pendiente
-             }
-             console.log("Estado de 'mdtGeoTiffImage' al hacer clic en Generar Pasadas:", mdtGeoTiffImage ? 'cargado' : 'no cargado');
-             if (!mdtGeoTiffImage) {
-                  console.warn("Advertencia: Los datos del MDT (TIFF) no se cargaron o parsearon correctamente. La verificación de pendiente será omitida."); // Advertencia en lugar de error fatal
-                 alert("Advertencia: Los datos del MDT no están disponibles. La verificación de pendiente será omitida. Espera a que carguen los datos o revisa la consola.");
-                  // Permitimos continuar, pero la verificación de pendiente no funcionará.
-             }
             // --- FIN VERIFICACIÓN ---
 
             console.log("--- Inicio Generación de Pasadas ---");
@@ -550,21 +415,14 @@
             generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores
             console.log("Limpiando pasadas generadas anteriormente.");
 
-            // --- Obtener el ancho de trabajo y el umbral de pendiente (el umbral es solo referencia en esta versión) ---
+            // --- Obtener el ancho de trabajo del input ---
             const workingWidth = parseFloat(workingWidthInput.value);
-            const maxSlopePercentage = parseFloat(maxSlopeInput.value); // Leer el valor del input de pendiente (solo para log/referencia)
-
             if (isNaN(workingWidth) || workingWidth <= 0) {
                  alert("Por favor, introduce un valor válido y positivo para el ancho de trabajo.");
                  console.error("Valor inválido para ancho de trabajo:", workingWidthInput.value);
                  return;
             }
-             if (isNaN(maxSlopePercentage) || maxSlopePercentage < 0) {
-                  console.warn("Valor inválido para umbral de pendiente (solo referencia en esta versión):", maxSlopeInput.value);
-                  // No retornamos, ya que el umbral no es crítico aquí.
-             }
-            console.log(`Ancho de trabajo: ${workingWidth}m, Umbral de pendiente (solo referencia): ${maxSlopePercentage}%`);
-
+            // --- Fin Obtener ancho de trabajo ---
 
             const units = 'meters'; // Unidades para Turf.js
 
@@ -578,9 +436,11 @@
                 // --- Lógica para obtener features de exclusión que intersectan con la parcela seleccionada ---
                  if (globalExclusionFeatures.length > 0) {
                      console.log(`Total features de exclusión cargadas globalmente: ${globalExclusionFeatures.length}`);
-                     console.log(`Filtrando features de exclusión para encontrar las que intersectan con la parcela seleccionada.`);
+                     console.log(`Filtrando features de exclusión (SOLO CONSTRUCCIONES Polygon/MultiPolygon en esta versión base) para encontrar las que intersectan con la parcela seleccionada.`);
+                     // NOTA: En esta versión base, globalExclusionFeatures solo contiene Polygon/MultiPolygon de Construcciones.
+                     // La lógica para incluir Elementos Internos (bufferizados) se añadió en versiones posteriores.
                       globalExclusionFeatures.forEach((exclusionFeature, index) => {
-                          // exclusionFeature ahora DEBERÍA ser un Feature con Polígono/MultiPolígono (buffers si eran LineString)
+                          // exclusionFeature en esta versión DEBE ser un Feature con Polígono/MultiPolígono de Construcciones
                          if (exclusionFeature.geometry && (exclusionFeature.geometry.type === 'Polygon' || exclusionFeature.geometry.type === 'MultiPolygon')) {
                               try {
                                    // Verificar si la feature de exclusión intersecta con la parcela seleccionada
@@ -592,14 +452,14 @@
                                   console.warn(`Error al verificar intersección para feature de exclusión #${index}. Se omitirá.`, exclusionFeature, e);
                               }
                          } else {
-                              // Esta advertencia ya no debería aparecer para los LineStrings si la corrección funcionó
+                              // Este log no debería aparecer si globalExclusionFeatures solo contiene Polígonos/MultiPolígonos de Construcciones
                               console.warn(`Geometría de feature de exclusión #${index} (${exclusionFeature.geometry ? exclusionFeature.geometry.type : 'null/undefined'}) no es Polígono/MultiPolígono válido para intersección. Se omitirá.`, exclusionFeature);
                          }
                       });
                  } else {
-                     console.log("No se cargaron features de exclusión globalmente (exclusionFeatures está vacío). No se excluirán zonas a evitar.");
+                     console.log("No se cargaron features de exclusión globalmente (exclusionFeatures está vacío).");
                  }
-                console.log(`Features de exclusión que intersectan con la parcela: ${intersectingExclusionFeatures.length}`);
+                console.log(`Features de exclusión (SOLO CONSTRUCCIONES Polygon/MultiPolygon) que intersectan con la parcela: ${intersectingExclusionFeatures.length}`);
 
 
                 // --- Simplificar ligeramente las features de exclusión que intersectan ---
@@ -1106,7 +966,7 @@
                     if (originalBboxWidthMeters >= originalBboxHeightMeters) {
                         rotationAngle = 0;
                         sweepDirectionInRotatedSpace = 0;
-                        heuristicDirectionDescription = "Bounding Box más ancho que alto (o igual)"; // Log ajustado
+                        heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
                     } else {
                         rotationAngle = 90;
                         sweepDirectionInRotatedSpace = 0;
@@ -1167,7 +1027,7 @@
                     rotatedSweepLineDirection = 90;
 
                      console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
-                } else { // Pasadas verticales en espacio rotado
+                } else {
                     rotatedStartSweepCoordValue = rotatedBboxWest;
                     rotatedEndSweepCoordValue = rotatedBboxEast;
                      rotatedSweepLineStartCoord = rotatedBboxSouth;
@@ -1196,55 +1056,68 @@
 
                  } catch(e) {
                      console.error("Error calculando distancias de la bbox rotada:", e);
-                       alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                      return;
+                      alert("Error calculando límites de la geometría rotada para generar pasadas.");
+                     return;
                  }
 
 
                let rotatedCurrentOffset = workingWidth / 2;
-               const samplingDistance = 1; // Distancia de muestreo a lo largo de cada línea de pasada para verificar el punto dentro y obtener pendiente
+               const samplingDistance = 1;
                const geometryForPiPCheck = rotatedGeometryForSweepAndPiP;
 
                console.log(`Generando pasadas de ${workingWidth}m en espacio rotado (muestreo de ${samplingDistance}m).`);
 
                 let generatedRotatedPasses = [];
 
+
                if (workingWidth <= 0 || totalSweepExtentMeters <= 0) {
                    console.warn("Ancho de trabajo o extensión del barrido <= 0. No se generarán pasadas.");
                    alert("Ancho de trabajo inválido o área a barrer muy pequeña.");
                    return;
                } else {
-                    // Bucle principal para generar líneas de pasada teóricas en el espacio rotado
-                    // Iteramos desde el inicio perpendicularmente a la dirección de barrido
-                    const sweepPerpendicularStart = (sweepDirectionInRotatedSpace === 0 ? rotatedBboxSouth : rotatedBboxWest);
-                    const sweepPerpendicularEnd = (sweepDirectionInRotatedSpace === 0 ? rotatedBboxNorth : rotatedBboxEast);
+                    const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
+                    while (rotatedCurrentOffset <= sweepLimit ) {
 
-                    // Ajuste para empezar desde el centro de la primera pasada
-                    let currentSweepCoord = sweepPerpendicularStart + (workingWidth / 2);
+                       let pointOnSweepAxis = null;
+                        try {
+                            pointOnSweepAxis = turf.destination(
+                                turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
+                                rotatedCurrentOffset / 1000,
+                                sweepDirectionInRotatedSpace,
+                                {units: 'kilometers'}
+                            );
+                        } catch(e) {
+                            console.error("Error en turf.destination al calcular punto en eje de barrido:", e);
+                            rotatedCurrentOffset += workingWidth;
+                            continue;
+                        }
 
-                    while (currentSweepCoord <= sweepPerpendicularEnd + (workingWidth * 0.1) ) { // Añadido un pequeño margen para asegurar la última pasada
+                        if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
+                             console.warn("turf.destination devolvió un punto inválido. Saltando esta pasada.");
+                             rotatedCurrentOffset += workingWidth;
+                             continue;
+                        }
 
-                       let startPointCoords, endPointCoords;
-                       if (sweepDirectionInRotatedSpace === 0) { // Pasadas horizontales en espacio rotado
-                            startPointCoords = [rotatedBboxWest, currentSweepCoord];
-                            endPointCoords = [rotatedBboxEast, currentSweepCoord];
-                       } else { // Pasadas verticales en espacio rotado
-                           startPointCoords = [currentSweepCoord, rotatedBboxSouth];
-                           endPointCoords = [currentSweepCoord, rotatedBboxNorth];
-                       }
+
+                       let passCenterCoord = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
+
 
                        let fullSweepLineInRotatedSpace = null;
                         try {
-                            fullSweepLineInRotatedSpace = turf.lineString([startPointCoords, endPointCoords]);
+                           if (sweepDirectionInRotatedSpace === 0) {
+                                fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
+                           } else {
+                                fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
+                           }
                         } catch(e) {
-                             console.error("Error en turf.lineString al crear línea de barrido completa en espacio rotado:", e);
-                             currentSweepCoord += workingWidth;
-                             continue;
+                             console.error("Error en turf.lineString al crear línea de barrido completa:", e);
+                            rotatedCurrentOffset += workingWidth;
+                            continue;
                         }
 
                          if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
                               console.warn("La línea de barrido completa no es válida (esperado LineString). Saltando esta pasada.");
-                              currentSweepCoord += workingWidth;
+                              rotatedCurrentOffset += workingWidth;
                               continue;
                          }
 
@@ -1254,225 +1127,89 @@
                              lineLength = turf.length(fullSweepLineInRotatedSpace, {units: units});
                         } catch(e) {
                              console.error("Error en turf.length al calcular longitud de línea de barrido:", e);
-                            currentSweepCoord += workingWidth;
+                            rotatedCurrentOffset += workingWidth;
                             continue;
                         }
 
-                       console.log(`  Procesando línea de pasada teórica a coordenada perpendicular ${currentSweepCoord.toFixed(2)}m. Longitud: ${lineLength.toFixed(2)}m.`);
+                       // En esta versión base, se usa turf.lineSlice para obtener segmentos dentro del polígono.
+                       // No hay muestreo punto a punto ni verificación de pendiente/elevación aquí.
+                       let lineSegments = null;
+                        try {
+                            // lineSlice regresa un FeatureCollection de LineStrings o MultiLineStrings
+                           lineSegments = turf.lineSlice(turf.point([rotatedBboxWest, passCenterCoord]), turf.point([rotatedBboxEast, passCenterCoord]), rotatedGeometryForSweepAndPiP);
 
-                       let currentSegmentPoints = [];
-                       let previousPointWithElevation = null; // Para almacenar el punto anterior con su elevación
+                            // NOTA: El lineSlice en esta versión base no usa el concepto de "área limpia",
+                            // solo corta la línea de barrido contra la geometría SIMPLIFICADA de la parcela original.
+                            // La lógica para usar la "área limpia" (parcela - exclusiones) en lineSlice o
+                            // pasar a un enfoque de muestreo punto a punto con PiP se añadió en versiones posteriores.
 
-                       // Muestrear puntos a lo largo de la línea de barrido teórica
-                       // Iterar con una pequeña tolerancia al final para incluir el último punto
-                       for (let i = 0; i <= lineLength + (samplingDistance * 0.1); i += samplingDistance) {
-                           let point = null;
-                           try {
-                               point = turf.along(fullSweepLineInRotatedSpace, Math.min(i, lineLength), {units: units}); // Asegurar no ir más allá del final
-                               console.log(`    Muestreando punto a ${i.toFixed(2)}m: [${point.geometry.coordinates[0].toFixed(6)}, ${point.geometry.coordinates[1].toFixed(6)}]`);
-                           } catch(e) {
-                               console.warn("    Error en turf.along al muestrear punto.", i, e);
-                               continue;
-                           }
-
-                           if (!point || !point.geometry || !point.geometry.coordinates) {
-                                console.warn(`    turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
-                                // Si el punto es inválido, y teníamos un segmento, lo cerramos.
-                                if (currentSegmentPoints.length > 1) {
-                                     try {
-                                         console.log(`    Punto inválido. Cerrando segmento con ${currentSegmentPoints.length} puntos.`);
-                                         generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
-                                     } catch(e) {
-                                         console.error("    Error en turf.lineString al crear segmento (punto inválido).", e);
-                                     }
-                                } else if (currentSegmentPoints.length === 1) {
-                                     console.log(`    Punto inválido. Descartando segmento con 1 punto.`);
-                                }
-                                currentSegmentPoints = [];
-                                previousPointWithElevation = null;
-                                continue; // Pasar al siguiente punto muestreado
-                           }
-
-                           // Verificar si el punto muestreado está dentro de la geometría limpia (parcela - exclusiones)
-                           let isInsideCleanArea = false;
-                           if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
-                               try {
-                                   isInsideCleanArea = turf.booleanPointInPolygon(point, geometryForPiPCheck);
-                                    console.log(`    Punto dentro del área limpia?: ${isInsideCleanArea}`);
-                               } catch(e) {
-                                   console.warn("    Error durante booleanPointInPolygon para punto en muestreo.", point, e);
-                                   isInsideCleanArea = false;
-                               }
-                           } else {
-                               // Esto no debería ocurrir si la lógica anterior fue correcta
-                               console.error("    La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
-                               isInsideCleanArea = false;
-                           }
-
-                           let elevation = null;
-                           let slope = NaN; // Inicializar pendiente como NaN
-                           let currentTurfPointWithElevation = null;
+                        } catch(e) {
+                             console.warn("Error en turf.lineSlice para línea de barrido completa:", fullSweepLineInRotatedSpace, e);
+                             // Continuar a la siguiente pasada si lineSlice falla
+                             rotatedCurrentOffset += workingWidth;
+                             continue;
+                        }
 
 
-                           // Solo intentar obtener elevación y calcular pendiente si el punto está dentro del área limpia Y el MDT está disponible
-                           if (isInsideCleanArea && mdtGeoTiffImage) {
-                                // Obtener elevación para el punto actual
-                                try {
-                                    // getElevationAtLatLng necesita lat/lng, point.geometry.coordinates es [lng, lat]
-                                    elevation = await getElevationAtLatLng(point.geometry.coordinates[1], point.geometry.coordinates[0], mdtGeoTiffImage);
-                                    console.log(`    Elevación obtenida: ${elevation !== null ? elevation.toFixed(2) : 'NoData/Error'}`);
-
-                                    // Si se obtuvo elevación válida, crear un punto Turf con esa elevación para el cálculo de pendiente
-                                     if (elevation !== null) {
-                                        currentTurfPointWithElevation = turf.point(point.geometry.coordinates, { elevation: elevation });
-
-                                         // Solo calcular pendiente si hay un punto anterior con elevación válida
-                                         if (previousPointWithElevation !== null && previousPointWithElevation.properties.elevation !== null) {
-                                              try {
-                                                  slope = calculateSlopePercentage(previousPointWithElevation, currentTurfPointWithElevation);
-                                                  console.log(`    Pendiente calculada con punto anterior (${previousPointWithElevation.geometry.coordinates[0].toFixed(6)}, ${previousPointWithElevation.geometry.coordinates[1].toFixed(6)}, ${previousPointWithElevation.properties.elevation !== null ? previousPointWithElevation.properties.elevation.toFixed(2) : 'null'}): ${isNaN(slope) ? 'NaN' : slope.toFixed(2)}%, Umbral (ref): ${maxSlopePercentage}%`);
-
-                                              } catch(e) {
-                                                   console.warn("    Error durante calculateSlopePercentage.", e);
-                                                   slope = NaN; // Asegurarse de que sea NaN si hay error
-                                              }
-                                         } else {
-                                              console.log(`    Punto actual con elevación válida, pero sin punto anterior válido para calcular pendiente.`);
-                                         }
-                                    } else {
-                                         console.log(`    No se obtuvo elevación válida (NoData/Error) para este punto.`);
-                                    }
-
-                                } catch(e) {
-                                     console.warn(`    Error general obteniendo elevación para punto [${point.geometry.coordinates[0]}, ${point.geometry.coordinates[1]}]`, e);
-                                     elevation = null; // Asegurarse de que sea null si hay error
-                                     currentTurfPointWithElevation = null;
-                                     console.log(`    Error general al obtener elevación.`);
-                                }
-                           } else if (isInsideCleanArea && !mdtGeoTiffImage) {
-                                // Si el punto está dentro del área limpia pero el MDT no está disponible, no podemos obtener elevación ni calcular pendiente.
-                                // Registramos esto, pero el punto aún se añadirá al segmento si está dentro del área limpia.
-                                console.log(`    MDT no cargado, omitiendo obtención de elevación y cálculo de pendiente.`);
-                                elevation = null; // No hay elevación disponible
-                                slope = NaN; // No hay pendiente disponible
-                                currentTurfPointWithElevation = turf.point(point.geometry.coordinates, { elevation: null }); // Guardamos el punto sin elevación válida
-
-                           } else {
-                                // Si el punto no está dentro del área limpia, no intentamos obtener elevación ni calcular pendiente.
-                                console.log(`    Punto fuera del área limpia.`);
-                                elevation = null;
-                                slope = NaN;
-                                currentTurfPointWithElevation = null;
-                           }
-
-
-                           // --- Lógica para añadir el punto al segmento o cerrar el segmento actual ---
-                           // El punto se añade si está dentro del área limpia Y (si el MDT está cargado, se pudo obtener elevación VÁLIDA. Si el MDT no está cargado, solo necesita estar dentro del área limpia)
-                            const shouldAddPointToSegment = isInsideCleanArea && (mdtGeoTiffImage === null || elevation !== null);
-
-
-                           if (shouldAddPointToSegment) {
-                                // Añadir las coordenadas (con elevación como 3ra coordenada si está disponible)
-                                const pointCoordsWithElevation = [
-                                     point.geometry.coordinates[0],
-                                     point.geometry.coordinates[1],
-                                     elevation // Añadir la elevación como tercera coordenada (o null si no se obtuvo)
-                                ];
-                               currentSegmentPoints.push(pointCoordsWithElevation);
-                               console.log(`    Punto añadido a currentSegmentPoints. Tamaño actual: ${currentSegmentPoints.length}`);
-
-                                // Actualizar el punto anterior con elevación para el próximo cálculo de pendiente
-                                // Solo actualizamos previousPointWithElevation si el punto actual tenía una elevación válida
-                                if (elevation !== null) {
-                                    previousPointWithElevation = currentTurfPointWithElevation;
-                                } else {
-                                    // Si el punto actual no tiene elevación válida (incluso si shouldAddPointToSegment es true),
-                                    // no podemos usarlo como el inicio de un cálculo de pendiente para el siguiente punto.
-                                    previousPointWithElevation = null; // Reiniciamos el punto anterior válido para pendiente
-                                    console.log(`    Punto actual sin elevación válida. previousPointWithElevation reseteado.`);
-                                }
-
-
-                           } else {
-                               // Si el punto no se añade (fuera del área limpia O no se obtuvo elevación válida con MDT cargado)
-                               // Terminamos el segmento actual si tiene al menos 2 puntos válidos
-                               console.log(`    Punto NO añadido a currentSegmentPoints (isInsideCleanArea: ${isInsideCleanArea}, elevation !== null: ${elevation !== null}, mdtGeoTiffImage loaded: ${mdtGeoTiffImage !== null}).`);
-                               if (currentSegmentPoints.length > 1) {
+                       if (lineSegments && lineSegments.type === 'FeatureCollection' && Array.isArray(lineSegments.features)) {
+                            lineSegments.features.forEach(segment => {
+                                if (segment && segment.geometry && segment.geometry.type === 'LineString') {
                                     try {
-                                        // Crear LineString del segmento válido
-                                        console.log(`    Punto no añadido. Cerrando segmento con ${currentSegmentPoints.length} puntos válidos.`);
-                                        generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
+                                         // turf.length puede lanzar errores con geometrías inválidas
+                                        if (turf.length(segment, { units: units }) > 0.5) { // Añadir solo segmentos de longitud significativa
+                                             // Rotar el segmento de vuelta y añadirlo al mapa
+                                             if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
+                                                 console.warn(`Centroide no válido al rotar segmento. Saltando rotación para este segmento.`);
+                                                 return; // Saltar este segmento, no la pasada completa
+                                             }
+                                            const originalSegmentGeometry = turf.transformRotate(segment.geometry, -rotationAngle, {pivot: centroid});
+                                            L.geoJSON(originalSegmentGeometry, {
+                                                style: { color: '#800080', weight: 2 }
+                                            }).addTo(generatedPassesLayer);
+                                        }
                                     } catch(e) {
-                                        console.error("    Error en turf.lineString al crear segmento de pasada rotada (fin de segmento por punto no válido).", e);
+                                        console.warn("Error verificando o rotando segmento:", segment, e);
                                     }
-                               } else if (currentSegmentPoints.length === 1) {
-                                   console.log(`    Punto no añadido. Descartando segmento con 1 punto.`);
-                               } else {
-                                    console.log(`    Punto no añadido. Segmento anterior tenía 0 puntos. Nada que añadir.`);
-                               }
-                               // Reiniciar el segmento actual y el punto anterior para la pendiente
-                               currentSegmentPoints = [];
-                               previousPointWithElevation = null;
-                           }
-
-                           // Pequeña pausa para no bloquear el navegador (útil para depuración con muchos puntos)
-                            await new Promise(resolve => setTimeout(resolve, 0)); // Pausa de 0ms para permitir actualizaciones de UI y logs
-
-                       } // Fin del bucle for (muestreo a lo largo de la línea teórica)
-
-                       // Después de salir del bucle de muestreo (fin de la línea teórica), si el último segmento tiene puntos, añadirlo
-                       if (currentSegmentPoints.length > 1) {
-                            try {
-                                console.log(`  Fin de línea teórica. Último segmento tiene ${currentSegmentPoints.length} puntos. Añadiendo a generatedRotatedPasses.`);
-                                generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
-                           } catch(e) {
-                                console.error("  Error en turf.lineString al crear segmento final de pasada rotada.", e);
-                           }
-                       } else if (currentSegmentPoints.length === 1) {
-                            console.log(`  Fin de línea teórica. Último segmento tiene solo 1 punto. Descartando.`);
+                                } else if (segment && segment.geometry && segment.geometry.type === 'MultiLineString') {
+                                     console.warn("lineSlice devolvió un MultiLineString. Procesando partes.");
+                                      turf.geomEach(segment.geometry, function(linePart) {
+                                           if (linePart.type === 'LineString') {
+                                                 try {
+                                                      if (turf.length(turf.feature(linePart), { units: units }) > 0.5) { // turf.length espera Feature o Geometry
+                                                           if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
+                                                                console.warn(`Centroide no válido al rotar parte de MultiLineString. Saltando rotación.`);
+                                                                return;
+                                                           }
+                                                           const originalPartGeometry = turf.transformRotate(linePart, -rotationAngle, {pivot: centroid});
+                                                           L.geoJSON(originalPartGeometry, {
+                                                               style: { color: '#800080', weight: 2 }
+                                                           }).addTo(generatedPassesLayer);
+                                                      }
+                                                 } catch(e) {
+                                                      console.warn("Error verificando o rotando parte de MultiLineString:", linePart, e);
+                                                 }
+                                           }
+                                      });
+                                } else {
+                                     console.warn(`Segmento de lineSlice no es LineString/MultiLineString válido (${segment ? segment.geometry.type : 'null/undefined'}). Se omitirá.`, segment);
+                                }
+                            });
                        } else {
-                             console.log(`  Fin de línea teórica. Último segmento tiene 0 puntos. Nada que añadir.`);
+                             console.log("lineSlice no devolvió FeatureCollection con features o está vacío.");
                        }
 
-                       // Avanzar a la siguiente pasada
-                       currentSweepCoord += workingWidth; // Avanzar el ancho de trabajo completo
-                    console.log(`  Avanzando a la siguiente línea de pasada teórica a coordenada perpendicular ${currentSweepCoord.toFixed(2)}m.`);
-                   } // Fin del bucle while (líneas de pasada teóricas)
+
+                       rotatedCurrentOffset += workingWidth;
+                   }
                }
 
 
-               console.log(`Generadas ${generatedRotatedPasses.length} segmentos de pasadas válidas (respetando exclusiones y disponibilidad de elevación) en el espacio rotado.`);
-
-               console.log(`Rotando pasadas de vuelta por ${-rotationAngle.toFixed(2)} grados.`);
-               generatedRotatedPasses.forEach((rotatedPass, index) => {
-                   try {
-                        if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
-                             if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                                 console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
-                                 return;
-                             }
-                             // Rotar la geometría de la pasada
-                             const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
-
-                             // Crear una feature con la geometría rotada y añadirla a la capa de pasadas generadas
-                             L.geoJSON(originalPassGeometry, {
-                                 style: { color: '#800080', weight: 2 }
-                             }).addTo(generatedPassesLayer);
-                        } else {
-                             console.warn(`La pasada rotada #${index} no es un LineString válido. No se añadirá al mapa.`, rotatedPass);
-                        }
-
-                   } catch (e) {
-                       console.warn(`Error al rotar una pasada de vuelta (#${index}):`, rotatedPass, e);
-                   }
-               });
-
-               console.log("Generación de pasadas (respetando exclusiones y mostrando pendiente) finalizada.");
+               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
                 console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
                console.error("Error general durante la generación de pasadas:", e);
-               console.error("Parcel Geometry (inicio):", typeof parcelGeometry !== 'undefined' ? JSON.stringify(parcelGeometry) : 'undefined');
+               console.error("Parcel Geometry (inicio):", JSON.stringify(parcelGeometry));
                if (typeof geometryForCalculations !== 'undefined') {
                     console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
                }
@@ -1489,8 +1226,7 @@
 
         // --- LOGS INICIALES ---
         console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
-        console.log("La carga automática de datos geoespacial es comenzará al terminar de cargar el DOM.");
-
+        console.log("La carga automática de datos geoespaciales comenzará al terminar de cargar el DOM.");
 
     </script>
 
