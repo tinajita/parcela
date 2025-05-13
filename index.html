@@ -55,7 +55,7 @@
         <label for="maxSlope">Pendiente Máx. (%):</label>
         <input type="number" id="maxSlope" value="40" min="0" max="100">
         <button id="generarPasadasBtn" disabled>Generar Pasadas (Cargando Datos...)</button>
-        <div id="loading-status">Cargando datos geoespaciales...</div>
+        <div id="loading-status">Cargando datos geoespacial es...</div>
     </div>
 
 
@@ -1166,9 +1166,10 @@
                     rotatedSweepLineDirection = 90;
 
                      console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
-                } else {
+                } else { // Pasadas verticales en espacio rotado
                     rotatedStartSweepCoordValue = rotatedBboxWest;
-                    rotatedEndSweepCoordValue = rotatedBboxEast;
+                    // CORRECCIÓN: Quitar el espacio extra aquí
+                    rotatedEndSweepCoordValue = rotatedBboxEast; // Línea corregida
                      rotatedSweepLineStartCoord = rotatedBboxSouth;
                      rotatedSweepLineEndCoord = rotatedBboxNorth;
                      rotatedSweepLineDirection = 0;
