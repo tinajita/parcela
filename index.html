@@ -252,10 +252,11 @@
             onAdd: function(map) {
                 const div = L.DomUtil.create('div', 'zoom-display-control');
                 div.style.cssText = 'background: white; padding: 5px; border-radius: 5px; border: 1px solid #ccc; box-shadow: 0 1px 5px rgba(0,0,0,0.4); margin: 5px; font-size: 0.9em; text-align: center;';
+                this._container = div; // *** CORRECCIÓN: Asignar el div a _container ***
                 this._map = map;
                 this.updateZoom(map.getZoom());
                 map.on('zoomend', this._onZoomEnd, this);
-                return div;
+                return this._container; // *** CORRECCIÓN: Retornar _container ***
             },
 
             onRemove: function(map) {
@@ -729,7 +730,7 @@
                      // Continuar con la generación de pasadas pero sin datos de exclusión
                      window.exclusionFeatures = []; // Asegurar que esté vacío si hubo error
                      exclusionLayersLoaded = true; // Marcar como cargado para no intentar de nuevo
-                     generatePassasLogic(); // Intentar generar pasadas sin exclusiones
+                     generatePassesLogic(); // Intentar generar pasadas sin exclusiones
 
                  });
 
