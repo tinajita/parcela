@@ -295,9 +295,10 @@
                       return response.json();
                  }),
                  fetch(mdtGeoTiffDataUrl).then(response => {
-                      if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
+                      if (!response.ok) throw new Error(`Error al cargar MDT: ${response.status}`); // Check status here
                        console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                      return response;
+                      // No need to parse as JSON for TIFF
+                      return response; // Pass the response object for further handling if needed
                  })
             ])
             .then(([parcelasGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => {
@@ -357,6 +358,8 @@
                                         elevation = feature.properties.altura;
                                     }
 
+                                    // Se comentan las líneas que asocian un popup al click en las curvas de nivel
+                                    /*
                                     if (elevation !== null) {
                                         layer.bindPopup('Elevación: ' + elevation + ' m');
                                     } else {
@@ -368,6 +371,7 @@
                                          }
                                          layer.bindPopup(popupContent);
                                     }
+                                    */
                                 }
                            }
                        }).addTo(map);
@@ -386,6 +390,8 @@
                  console.log("Intento de carga de MDT (TIFF) completado.");
                  if (mdtTiffResponse && mdtTiffResponse.ok) {
                       console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
+                      // Puedes añadir aquí lógica para procesar el TIFF si es necesario en el futuro,
+                      // pero para este propósito, solo verificamos la carga.
                  } else {
                       console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
