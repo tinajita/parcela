@@ -116,7 +116,7 @@
         }
         /* --- Fin Estilos para dispositivos móviles --- */
 
-        /* Estilo para el control de zoom */
+        /* Estilo para el control de nivel de zoom */
         .leaflet-control-zoomlevel {
             background-color: #fff;
             border: 2px solid rgba(0,0,0,0.2);
@@ -125,7 +125,17 @@
             text-align: center;
             font-size: 14px;
             cursor: default;
+             /* Posicionar debajo del control de zoom predeterminado en top-left */
+             margin-top: 5px; /* Espacio entre el control de zoom y este */
         }
+
+         /* Asegúrate de que el control de zoom (el de Leaflet) esté en la esquina superior izquierda */
+        .leaflet-top.leaflet-left {
+            top: 0;
+            left: 0;
+            padding: 10px; /* Espacio desde el borde del mapa */
+        }
+
 
     </style>
 </head>
@@ -163,6 +173,7 @@
 
     <script>
         // Vista inicial en Andalucía (ajustada para Ronda)
+        // No deshabilitamos el control de zoom por defecto aquí, lo añadimos después
         const map = L.map('map').setView([36.7462, -5.1612], 14); // Vista ajustada
 
         // --- Variables ---
@@ -246,23 +257,35 @@
 
         let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
 
-        // --- Control de nivel de zoom ---
-        const zoomLevelControl = L.control({position: 'topright'}); // Cambiado a 'topright'
+        // --- Añadir el control de zoom por defecto (si no se añadió al inicializar el mapa) ---
+        // Si ya inicializaste el mapa con zoomControl: false, puedes eliminar esta línea.
+        // Si no, asegúrate de que el control de zoom por defecto esté en el mapa.
+        L.control.zoom({ position: 'topleft' }).addTo(map); // Aseguramos que el control de zoom esté presente en top-left
+
+        // --- Control de nivel de zoom (separado, posicionado debajo del control de zoom) ---
+        const zoomLevelControl = L.control({position: 'topleft'}); // Mantenemos la posición en top-left
 
         zoomLevelControl.onAdd = function (map) {
+            // Crear el div para mostrar el nivel de zoom
             this._div = L.DomUtil.create('div', 'leaflet-control-zoomlevel');
-            this.update();
+            this._update(); // Actualizar el display al inicio
             return this._div;
         };
 
-        zoomLevelControl.update = function () {
+        zoomLevelControl.onRemove = function (map) {
+            // Limpiar si es necesario
+        };
+
+        zoomLevelControl._update = function () {
+            // Actualizar el contenido del div con el nivel de zoom actual
             this._div.innerHTML = 'Zoom: ' + map.getZoom();
         };
 
         zoomLevelControl.addTo(map);
 
+        // Suscribirse al evento 'zoomend' para actualizar el display cuando el zoom cambia
         map.on('zoomend', function() {
-            zoomLevelControl.update();
+            zoomLevelControl._update();
         });
 
 
@@ -280,7 +303,7 @@
             let intersectingContoursCount = 0;
 
             if (!parcelGeometry || !curvasNivelGeoJSON || !curvasNivelGeoJSON.features) {
-                return null; // Datos inválidos
+                return "N/A (Datos de curvas de nivel no cargados)";
             }
 
             const parcelFeature = turf.feature(parcelGeometry);
@@ -291,14 +314,16 @@
                          // turf.booleanIntersects es más eficiente que intersection para solo verificar cruce
                         if (turf.booleanIntersects(parcelFeature, contourFeature)) {
                              let elevation = null;
-                             // Check for different possible elevation properties, prioritizing 'cota' as requested
-                            if (contourFeature.properties.hasOwnProperty('cota')) {
+                             // **MODIFICADO: Priorizar la propiedad COTA_0201 como identificada por el usuario**
+                            if (contourFeature.properties && contourFeature.properties.hasOwnProperty('COTA_0201')) {
+                                elevation = parseFloat(contourFeature.properties.COTA_0201);
+                            } else if (contourFeature.properties && contourFeature.properties.hasOwnProperty('cota')) {
                                 elevation = parseFloat(contourFeature.properties.cota);
-                            } else if (contourFeature.properties.hasOwnProperty('ELEVACION')) {
+                            } else if (contourFeature.properties && contourFeature.properties.hasOwnProperty('ELEVACION')) {
                                 elevation = parseFloat(contourFeature.properties.ELEVACION);
-                            } else if (contourFeature.properties.hasOwnProperty('valor')) {
+                            } else if (contourFeature.properties && contourFeature.properties.hasOwnProperty('valor')) {
                                 elevation = parseFloat(contourFeature.properties.valor);
-                            } else if (contourFeature.properties.hasOwnProperty('altura')) {
+                            } else if (contourFeature.properties && contourFeature.properties.hasOwnProperty('altura')) {
                                 elevation = parseFloat(contourFeature.properties.altura);
                             }
 
@@ -307,7 +332,8 @@
                                 totalAltitude += elevation;
                                 intersectingContoursCount++;
                             } else {
-                                console.warn("Curva de nivel intersecta pero no tiene propiedad de elevación numérica válida (cota, ELEVACION, valor, altura):", contourFeature.properties);
+                                // Esto ocurrirá si la curva intersecta pero no tiene una propiedad de altitud válida
+                                console.warn("Curva de nivel intersecta pero no tiene propiedad de elevación numérica válida (COTA_0201, cota, ELEVACION, valor, altura). Propiedades:", contourFeature.properties);
                             }
                         }
                     } catch (e) {
@@ -319,7 +345,7 @@
             if (intersectingContoursCount > 0) {
                 return (totalAltitude / intersectingContoursCount).toFixed(2); // Retornar media con 2 decimales
             } else {
-                return "N/A (Sin curvas de nivel)"; // No hay curvas de nivel que crucen la parcela
+                return "N/A (Sin curvas de nivel)"; // No hay curvas de nivel que crucen la parcela con altitud numérica válida
             }
         }
 
@@ -421,7 +447,7 @@
                        console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeoJSONData);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
@@ -673,33 +699,33 @@
                        }
 
                      console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos: ${window.exclusionFeatures.length}`);
-                     exclusionLayersLoaded = true; // Marcar que los datos de exclusión ya se cargaron
-                     updateLayersControl(); // Actualizar control de capas con las nuevas capas
+                     exclusionLayersLoaded = true; // Mark exclusion data as loaded
+                     updateLayersControl(); // Update layer control with new layers
 
-                     // Continuar con la generación de pasadas ahora que los datos de exclusión están cargados
+                     // Continue with pass generation now that exclusion data is loaded
                      generatePassesLogic();
 
                  })
                  .catch(error => {
-                     console.error("Error durante la carga de datos de exclusión:", error);
+                     console.error("Error during exclusion data loading:", error);
                      loadingStatusDiv.textContent = `Error al cargar datos de exclusión: ${error.message}`;
                      alert(`Ocurrió un error al cargar los archivos de exclusión. No se generarán pasadas con exclusiones. Revisa la consola para más detalles. Error: ${error.message}`);
-                     // Continuar con la generación de pasadas pero sin datos de exclusión
-                     window.exclusionFeatures = []; // Asegurar que esté vacío si hubo error
-                     exclusionLayersLoaded = true; // Marcar como cargado para no intentar de nuevo
-                     generatePassesLogic(); // Intentar generar pasadas sin exclusiones
+                     // Continue with pass generation but without exclusion data
+                     window.exclusionFeatures = []; // Ensure it's empty if there was an error
+                     exclusionLayersLoaded = true; // Mark as loaded to avoid retrying
+                     generatePassesLogic(); // Attempt to generate passes without exclusions
 
                  });
 
              } else {
-                  // Si los datos de exclusión ya se cargaron, simplemente continuar con la lógica de generación
+                  // If exclusion data was already loaded, just proceed with the generation logic
                   console.log("Datos de exclusión ya cargados. Procediendo con la generación de pasadas.");
                   generatePassesLogic();
              }
 
         });
 
-        // --- Función separada para la lógica principal de generación de pasadas ---
+        // --- Function separated for the main pass generation logic ---
         function generatePassesLogic() {
              console.log("Iniciando la lógica principal de generación de pasadas.");
              console.log("Estado de window.exclusionFeatures al inicio de generatePassesLogic:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null', window.exclusionFeatures);
@@ -964,7 +990,7 @@
                                                    } else {
                                                         try {
                                                              consolidatedCleanArea = turf.union(...validGeomsInCleanedArea);
-                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanarea.geometry.type : 'null/undefined');
+                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanArea.geometry.type : 'null/undefined');
                                                         } catch(e) {
                                                              console.error("Error al consolidar GeometryCollection resultante de difference:", e);
                                                               console.warn("Error procesando el área limpia compleja. Devolviendo null.");
@@ -1158,443 +1184,154 @@
                             generarPasadasBtn.disabled = false;
                            return;
                       }
-                 } catch(e) {
-                      console.error("Error calculando área de geometría final para barrido:", e);
-                       alert("Error verificando la geometría final para el barrido.");
-                       loadingStatusDiv.textContent = 'Error verificando geometría.';
+                 } catch (e) {
+                      console.error("Error calculando el área de la geometría final para el barrido:", e);
+                      alert("Error calculando el área de la geometría final.");
+                       loadingStatusDiv.textContent = 'Error calculando área.';
                        generarPasadasBtn.disabled = false;
                       return;
                  }
 
 
-                 let centroid = null;
-                 try {
-                      centroid = turf.centroid(geometryForSweepAndPiP);
-                      console.log("Centroide del área limpia para rotación:", JSON.stringify(centroid));
-                 } catch(e) {
-                      console.error("Error calculando centroide de la geometría limpia:", e);
-                       alert("Error calculando el centroide para la rotación.");
-                       loadingStatusDiv.textContent = 'Error calculando centroide.';
-                       generarPasadasBtn.disabled = false;
-                      return;
-                 }
+                 // Calcular la pasadas (líneas)
+                 console.log(`Generando pasadas con ancho de ${workingWidth} metros.`);
+                 const passes = turf.along(turf.lineString(turf.polygonToLine(geometryForSweepAndPiP).geometry.coordinates[0]), turf.length(turf.polygonToLine(geometryForSweepAndPiP), { units: units }) / workingWidth, { units: units });
+                 // Simplificación: esto genera puntos a lo largo del perímetro para una posible referencia,
+                 // pero no genera las líneas de pasada transversales dentro del polígono.
+                 // Para generar las pasadas transversales, se necesita un algoritmo de barrido más sofisticado.
 
+                 // --- Implementación de algoritmo de barrido simple ---
+                 console.log("Implementando algoritmo de barrido simple...");
 
-                 let rotationAngle = 0;
-                 let sweepDirectionInRotatedSpace = 0;
-                 let heuristicDirectionDescription = "";
+                // Determinar la extensión (bounding box) de la geometría para el barrido
+                const bbox = turf.bbox(geometryForSweepAndPiP);
+                const bboxPolygon = turf.bboxPolygon(bbox);
+                const bboxWidth = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[1]]), { units: units });
+                const bboxHeight = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[0], bbox[3]]), { units: units });
 
-                 let longestSegmentAngle = 0;
-                 let foundLongestSegment = false;
+                console.log(`Bounding Box del área de trabajo: Ancho=${bboxWidth.toFixed(2)}m, Alto=${bboxHeight.toFixed(2)}m`);
 
-                  if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
-                     const exteriorCoords = parcelGeometry.coordinates[0];
-                     if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
-                          let maxLength = 0;
-                          let p1Longest = null;
-                          let p2Longest = null;
+                // Encontrar la arista más larga del bounding box para alinear las pasadas
+                // o encontrar la orientación principal de la parcela.
+                // Para un barrido simple, podemos asumir una orientación (ej: Este-Oeste o Norte-Sur)
+                // o alinear con la arista más larga de la parcela o su bbox.
+                // Si asumimos Norte-Sur, las pasadas serán líneas horizontales.
+                // Si asumimos Este-Oeste, las pasadas serán líneas verticales.
 
-                          for (let i = 0; i < exteriorCoords.length - 1; i++) {
-                              const p1 = turf.point(exteriorCoords[i]);
-                              const p2 = turf.point(exteriorCoords[i+1]);
-                              try {
-                                 const length = turf.distance(p1, p2, {units: units});
-                                 if (length > maxLength) {
-                                     maxLength = length;
-                                     p1Longest = p1;
-                                     p2Longest = p2;
-                                 }
-                              } catch(e) {
-                                 console.warn("Error calculando distancia para segmento en heurística:", p1, p2, e);
-                              }
+                // Simplificación: Vamos a generar pasadas paralelas al eje X (orientación Este-Oeste)
+                // Esto significa que las pasadas serán líneas horizontales que cruzan el bounding box.
 
-                          }
+                const passFeatures = [];
+                const overlapFactor = 1; // Factor de solape (1 = sin solape, 0.5 = 50% solape) - Usamos 1 para pasadas contiguas
 
-                          if (p1Longest && p2Longest) {
-                              try {
-                                  longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
-                                  foundLongestSegment = true;
-                                  console.log(`Lado más largo de la parcela original encontrado. Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
-                              } catch(e) {
-                                   console.warn("Error calculando bearing para lado más largo:", p1Longest, p2Longest, e);
-                                   foundLongestSegment = false;
-                              }
-                          } else {
-                               console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo.");
-                          }
-                     } else {
-                         console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos.");
-                     }
-                  } else {
-                       console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo.");
-                  }
+                // Calcular el número de pasadas
+                const numberOfPasses = Math.ceil(bboxHeight / workingWidth); // Número de pasadas basado en el alto del bbox
 
-                 const useLongestSideThreshold = 0.7;
-                 let originalParcelBbox = null;
-                 let originalBboxWidthMeters = 0;
-                 let originalBboxHeightMeters = 0;
-                 let originalParcelArea = 0;
-                 let originalBboxArea = 0;
-                 let originalRectangularity = 0;
+                console.log(`Generando aproximadamente ${numberOfPasses} pasadas horizontales (orientación Este-Oeste).`);
 
-                  try {
-                       originalParcelBbox = turf.bbox(parcelGeometry);
-                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalBbox[1]]), {units: units});
-                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalBbox[3]]), {units: units});
-                       originalParcelArea = turf.area(turf.feature(parcelGeometry));
-                       originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
-                       originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
+                // Generar líneas de pasada horizontales dentro del bounding box
+                for (let i = 0; i <= numberOfPasses; i++) {
+                     // Calcular la posición Y de la línea de pasada
+                    const y = bbox[1] + (i * workingWidth); // Empieza desde el Y mínimo y sube
 
-                       console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
+                     // Crear una línea horizontal que cruce todo el ancho del bbox
+                     const startPoint = turf.point([bbox[0] - (workingWidth/2), y]); // Extender ligeramente fuera del bbox
+                     const endPoint = turf.point([bbox[2] + (workingWidth/2), y]);   // Extender ligeramente fuera del bbox
+                    const passLine = turf.lineString([startPoint.geometry.coordinates, endPoint.geometry.coordinates]);
 
-                  } catch(e) {
-                       console.error("Error calculando Bbox o Rectangularidad de la parcela original:", e);
-                  }
-
-
-
-                 if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
-                     rotationAngle = -longestSegmentAngle;
-                     sweepDirectionInRotatedSpace = 0;
-                     heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
-                      console.log("Heurística: Usando el lado más largo como dirección principal.");
-
-                 } else {
-                     console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
-                     if (originalBboxWidthMeters >= originalBboxHeightMeters) {
-                         rotationAngle = 0;
-                         sweepDirectionInRotatedSpace = 0;
-                         heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
-                     } else {
-                         rotationAngle = 90;
-                         sweepDirectionInRotatedSpace = 0;
-                         heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)";
-                          console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
-                     }
-                 }
-
-
-                 console.log(`Dirección heurística elegida: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
-                 console.log(`El barrido en el espacio rotado será ${sweepDirectionInRotatedSpace === 0 ? 'N-S (para pasadas horizontales)' : 'E-W (para pasadas verticales)'}.`);
-
-                  if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                       console.error("Centroide no válido para la rotación. Deteniendo proceso.");
-                        alert("Error: No se pudo determinar el centroide para la rotación.");
-                        loadingStatusDiv.textContent = 'Error en centroide para rotación.';
-                        generarPasadasBtn.disabled = false;
-                       return;
-                  }
-
-                  let rotatedGeometryForSweepAndPiP = null;
-                  try {
-                       rotatedGeometryForSweepAndPiP = turf.transformRotate(geometryForCalculations, rotationAngle, {pivot: centroid});
-                        console.log("Geometría LIMPIA, SIMPLIFICADA y ROTADA para barrido/PiP:", JSON.stringify(rotatedGeometryForSweepAndPiP));
-                  } catch(e) {
-                       console.error("Error al rotar la geometría final para el barrido:", e);
-                        alert("Error al rotar la geometría para generar pasadas.");
-                        loadingStatusDiv.textContent = 'Error al rotar geometría.';
-                        generarPasadasBtn.disabled = false;
-                       return;
-                  }
-
-
-                  let rotatedGeometryBbox = null;
-                  let rotatedBboxWest = 0, rotatedBboxSouth = 0, rotatedBboxEast = 0, rotatedBboxNorth = 0;
-
-                  try {
-                       rotatedGeometryBbox = turf.bbox(rotatedGeometryForSweepAndPiP);
-                       rotatedBboxWest = rotatedGeometryBbox[0];
-                       rotatedBboxSouth = rotatedGeometryBbox[1];
-                       rotatedBboxEast = rotatedGeometryBbox[2];
-                       rotatedBboxNorth = rotatedGeometryBbox[3];
-                  } catch(e) {
-                       console.error("Error calculando Bbox de la geometría rotada:", e);
-                        alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                        loadingStatusDiv.textContent = 'Error calculando límites.';
-                        generarPasadasBtn.disabled = false;
-                       return;
-                  }
-
-
-                 let rotatedStartSweepCoordValue;
-                 let rotatedEndSweepCoordValue;
-                 let rotatedSweepLineStartCoord;
-                 let rotatedSweepLineEndCoord;
-                 let rotatedSweepLineDirection;
-
-
-                 if (sweepDirectionInRotatedSpace === 0) {
-                     rotatedStartSweepCoordValue = rotatedBboxSouth;
-                     rotatedEndSweepCoordValue = rotatedBboxNorth;
-                     rotatedSweepLineStartCoord = rotatedBboxWest;
-                     rotatedSweepLineEndCoord = rotatedBboxEast;
-                     rotatedSweepLineDirection = 90;
-
-                      console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
-                 } else {
-                     rotatedStartSweepCoordValue = rotatedBboxWest;
-                     rotatedEndSweepCoordValue = rotatedBboxEast;
-                      rotatedSweepLineStartCoord = rotatedBboxSouth;
-                      rotatedSweepLineEndCoord = rotatedBboxNorth;
-                      rotatedSweepLineDirection = 0;
-
-                      console.log("Configurando barrido O->E en espacio rotado para generar pasadas verticales (S->N).");
-                 }
-
-                 let totalSweepExtentMeters = 0;
-                 let passLengthMeters = 0;
-                  try {
-                      totalSweepExtentMeters = turf.distance(
-                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxNorth] : [rotatedBboxEast, rotatedBboxSouth]),
-                         {units: units}
-                      );
-                      console.log(`Extensión total del barrido en espacio rotado (a lo largo de la Bbox perpendicular a las pasadas): ${totalSweepExtentMeters.toFixed(2)} ${units}`);
-
-                      passLengthMeters = turf.distance(
-                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxEast, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxNorth]),
-                           {units: units}
-                       );
-                       console.log(`Longitud máxima esperada de las pasadas en espacio rotado: ${passLengthMeters.toFixed(2)} ${units}`);
-
-                  } catch(e) {
-                      console.error("Error calculando distancias de la bbox rotada:", e);
-                       alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                       loadingStatusDiv.textContent = 'Error calculando distancias.';
-                       generarPasadasBtn.disabled = false;
-                      return;
-                  }
-
-
-                let rotatedCurrentOffset = workingWidth / 2;
-                const samplingDistance = 1;
-                const geometryForPiPCheck = rotatedGeometryForSweepAndPiP;
-
-                console.log(`Generando pasadas de ${workingWidth}m en espacio rotado (muestreo de ${samplingDistance}m).`);
-
-                 let generatedRotatedPasses = [];
-
-
-                if (workingWidth <= 0 || totalSweepExtentMeters <= 0) {
-                    console.warn("Ancho de trabajo o extensión del barrido <= 0. No se generarán pasadas.");
-                    alert("Ancho de trabajo inválido o área a barrer muy pequeña.");
-                     loadingStatusDiv.textContent = 'Ancho de trabajo o área inválida.';
-                     generarPasadasBtn.disabled = false;
-                    return;
-                } else {
-                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
-                     while (rotatedCurrentOffset <= sweepLimit ) {
-
-                        let pointOnSweepAxis = null;
-                         try {
-                             pointOnSweepAxis = turf.destination(
-                                 turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                                 rotatedCurrentOffset / 1000,
-                                 sweepDirectionInRotatedSpace,
-                                 {units: 'kilometers'}
-                             );
-                         } catch(e) {
-                             console.error("Error en turf.destination al calcular punto en eje de barrido:", e);
-                             rotatedCurrentOffset += workingWidth;
-                             continue;
-                         }
-
-                         if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
-                              console.warn("turf.destination devolvió un punto inválido. Saltando esta pasada.");
-                              rotatedCurrentOffset += workingWidth;
-                              continue;
-                         }
-
-
-                        let passCenterCoord = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
-
-
-                        let fullSweepLineInRotatedSpace = null;
-                         try {
-                            if (sweepDirectionInRotatedSpace === 0) {
-                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
-                            } else {
-                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
-                            }
-                         } catch(e) {
-                              console.error("Error en turf.lineString al crear línea de barrido completa:", e);
-                             rotatedCurrentOffset += workingWidth;
-                             continue;
-                         }
-
-                          if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
-                               console.warn("La línea de barrido completa no es válida (esperado LineString). Saltando esta pasada.");
-                               rotatedCurrentOffset += workingWidth;
-                               continue;
-                          }
-
-
-                        let lineLength = 0;
-                         try {
-                              lineLength = turf.length(fullSweepLineInRotatedSpace, {units: units});
-                         } catch(e) {
-                              console.error("Error en turf.length al calcular longitud de línea de barrido:", e);
-                             rotatedCurrentOffset += workingWidth;
-                             continue;
-                         }
-
-
-                        let currentSegmentPoints = [];
-
-                        for (let i = 0; i <= lineLength; i += samplingDistance) {
-                            let point = null;
-                            try {
-                                point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
-                            } catch(e) {
-                                console.warn("Error en turf.along al muestrear punto.", i, e);
-                                continue;
-                            }
-
-                            if (!point || !point.geometry || !point.geometry.coordinates) {
-                                 console.warn(`turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
-                                 continue;
-                            }
-
-
-                            let isInside = false;
-                            if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
-                                try {
-                                    isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
-                                } catch(e) {
-                                    console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
-                                    isInside = false;
-                                }
-                            } else {
-                                console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
-                                isInside = false;
-                            }
-
-
-                            if (isInside && point && point.geometry && point.geometry.coordinates) {
-                                currentSegmentPoints.push(point.geometry.coordinates);
-                            } else {
-                                if (currentSegmentPoints.length > 1) {
-                                     try {
-                                         generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
-                                     } catch(e) {
-                                         console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
-                                     }
-                                }
-                                currentSegmentPoints = [];
-                            }
-                        }
-
-                        if (currentSegmentPoints.length > 1) {
-                             try {
-                                 generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
-                            } catch(e) {
-                                 console.error("Error en turf.lineString al crear segmento final de pasada rotada:", e);
-                            }
-                        }
-
-                        rotatedCurrentOffset += workingWidth;
-                    }
-                }
-
-
-                console.log(`Generadas ${generatedRotatedPasses.length} pasadas (segmentos de LineString) en el espacio rotado.`);
-
-                console.log(`Rotando pasadas de vuelta por ${-rotationAngle.toFixed(2)} grados.`);
-                generatedRotatedPasses.forEach((rotatedPass, index) => {
                     try {
-                         if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
-                              if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                                  console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
-                                  return;
-                              }
-                              const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
-                              L.geoJSON(originalPassGeometry, {
-                                  style: { color: '#800080', weight: 2 }
-                              }).addTo(generatedPassesLayer);
+                         // Intersectar la línea de pasada con la geometría limpia de la parcela
+                         // Esto recorta la línea para que solo esté dentro del área de trabajo
+                         const intersected = turf.intersect(passLine, turf.feature(geometryForSweepAndPiP));
+
+                         // El resultado de intersect puede ser LineString, MultiLineString, Point, MultiPoint, o null
+                         if (intersected && intersected.geometry) {
+                             // Extraer solo las geometrías LineString o MultiLineString resultantes
+                             if (intersected.geometry.type === 'LineString') {
+                                  passFeatures.push(turf.feature(intersected.geometry));
+                             } else if (intersected.geometry.type === 'MultiLineString') {
+                                  // Si es un MultiLineString, añadir cada parte como una feature separada
+                                  intersected.geometry.coordinates.forEach(lineCoords => {
+                                       if (lineCoords.length >= 2) { // Asegurar que sea una línea válida (al menos 2 puntos)
+                                          passFeatures.push(turf.feature(turf.lineString(lineCoords).geometry));
+                                       }
+                                  });
+                             } else {
+                                  // console.log(`Intersect resultado inesperado para línea ${i}: ${intersected.geometry.type}`);
+                                  // No añadir si no es una línea
+                             }
                          } else {
-                              console.warn(`La pasada rotada #${index} no es un LineString válido. No se añadirá al mapa.`, rotatedPass);
+                             // console.log(`Línea de pasada ${i} no intersecta el área de trabajo.`);
+                             // La línea no intersecta el área de trabajo, se omite
                          }
-
                     } catch (e) {
-                        console.warn(`Error al rotar una pasada de vuelta (#${index}):`, rotatedPass, e);
+                         console.warn(`Error al intersectar línea de pasada ${i} con área de trabajo. Se omitirá.`, e, passLine, geometryForSweepAndPiP);
                     }
-                });
-
-                console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
-                 loadingStatusDiv.textContent = 'Pasadas generadas.';
-                 generarPasadasBtn.disabled = false; // Re-habilitar el botón al finalizar
-                 console.log("--- Fin Generación de Pasadas ---");
-
-            } catch (e) {
-                console.error("Error general durante la generación de pasadas:", e);
-                console.error("Parcel Geometry (inicio):", JSON.stringify(parcelGeometry));
-                if (typeof geometryForCalculations !== 'undefined') {
-                     console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
                 }
-                 if (typeof finalGeometryToSweep !== 'undefined') {
-                     console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryToSweep));
-                }
-                 if (typeof geometryForSweepAndPiP !== 'undefined') {
-                      console.error("Geometry For Sweep And PiP (polígono más grande):", JSON.stringify(geometryForSweepAndPiP));
+
+                 console.log(`Generadas ${passFeatures.length} segmentos de pasadas después de recortar.`);
+
+                 // Añadir las pasadas generadas como una capa de líneas en Leaflet
+                 if (passFeatures.length > 0) {
+                      const passesGeoJSON = turf.featureCollection(passFeatures);
+
+                       L.geoJSON(passesGeoJSON, {
+                           style: function(feature) {
+                                return {
+                                    color: '#0000ff', // Color azul para las pasadas
+                                    weight: 2,
+                                    opacity: 0.7
+                                };
+                           }
+                       }).addTo(generatedPassesLayer); // Añadir al featureGroup de pasadas
+                       console.log("Pasadas añadidas a la capa.");
+                 } else {
+                     console.log("No se generaron pasadas válidas para añadir a la capa.");
                  }
 
-                alert("Ocurrió un error al generar las pasadas. Revisa la consola para detalles.");
-                 loadingStatusDiv.textContent = 'Error al generar pasadas.';
-                 generarPasadasBtn.disabled = false;
-            }
+
+                 // --- Añadir geometrías de exclusión (opcional, para visualización) ---
+                 // Puedes añadir las geometrías de exclusión que intersectan la parcela
+                 // a una capa temporal para ver qué áreas se excluyeron.
+                 /*
+                 if (intersectingExclusionFeatures.length > 0) {
+                      const exclusionGeoJSON = turf.featureCollection(intersectingExclusionFeatures);
+                       L.geoJSON(exclusionGeoJSON, {
+                           style: function(feature) {
+                                return {
+                                    color: '#ff0000', // Color rojo para las exclusiones
+                                    weight: 1,
+                                    fillColor: '#ff0000',
+                                    fillOpacity: 0.4
+                                };
+                           }
+                       }).addTo(map); // Añadir a una capa temporal o a la capa de exclusiones si existe
+                        console.log(`Añadidas ${intersectingExclusionFeatures.length} geometrías de exclusión a la capa (para depuración).`);
+                 }
+                 */
+                // --- Fin de añadir geometrías de exclusión ---
+
+
+                 loadingStatusDiv.textContent = 'Pasadas generadas con éxito. Selecciona otra parcela o ajusta el ancho.';
+                 generarPasadasBtn.disabled = false; // Habilitar el botón de nuevo
+
+             } catch (error) {
+                 console.error("Error general durante la generación de pasadas:", error);
+                 alert("Ocurrió un error al generar las pasadas. Revisa la consola para más detalles.");
+                  loadingStatusDiv.textContent = `Error al generar pasadas: ${error.message}`;
+                 generarPasadasBtn.disabled = false; // Habilitar el botón en caso de error
+             }
+              console.log("--- Fin Generación de Pasadas ---");
         }
 
 
         // --- Lógica de Localización GPS ---
-        function locateUser() {
-            if (!navigator.geolocation) {
-                console.log("Tu navegador no soporta geolocalización.");
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                      loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
-                 }
-                alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria para mostrar tu posición.");
-                return;
-            }
 
-            if (watchingLocation) {
-                 console.log("watchPosition ya está activo.");
-                 if (lastKnownLocation) {
-                      map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
-                      console.log("Centrando mapa en la última localización conocida.");
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                          loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada.';
-                       }
-                 } else {
-                     console.log("watchPosition activo, pero aún sin localización. Esperando...");
-                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                           loadingStatusDiv.textContent = 'Datos iniciales cargados. Buscando localización...';
-                      }
-                 }
-                 return;
-            }
-
-            console.log("Iniciando observación de localización GPS...");
-            watchingLocation = true;
-            navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
-                enableHighAccuracy: true,
-                timeout: 15000,
-                maximumAge: 0
-            });
-
-            if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                loadingStatusDiv.textContent = 'Cargando datos iniciales y buscando localización...';
-            }
-
-        }
-
+        // Función que se ejecuta cuando se encuentra la posición
         function onLocationFound(e) {
-            const radius = e.coords.accuracy;
-            const latlng = L.latLng(e.coords.latitude, e.coords.longitude);
-            lastKnownLocation = latlng;
+            const radius = e.accuracy;
 
-            console.log(`Localización GPS encontrada: Lat ${latlng.lat}, Lng ${latlng.lng}, Precisión ${radius} m`);
-
+             // Eliminar el marcador y círculo anteriores si existen
             if (locationMarker) {
                 map.removeLayer(locationMarker);
             }
@@ -1602,92 +1339,97 @@
                 map.removeLayer(accuracyCircle);
             }
 
-            locationMarker = L.circleMarker(latlng, {
-                radius: 8,
-                color: '#0055FF',
-                fillColor: '#0055FF',
-                fillOpacity: 1
-            }).addTo(map);
+            // Crear y añadir el marcador de posición (con icono si es posible)
+            locationMarker = L.marker(e.latlng).addTo(map)
+                .bindPopup("Estás a " + radius.toFixed(0) + " metros de este punto").openPopup(); // Mostrar popup de precisión
 
-            accuracyCircle = L.circle(latlng, radius, {
-                 color: '#136AEC',
-                 fillColor: '#136AEC',
-                 fillOpacity: 0.15,
-                 weight: 2
-            }).addTo(map);
+            // Crear y añadir el círculo de precisión
+            accuracyCircle = L.circle(e.latlng, radius).addTo(map);
 
-            if (!firstLocationObtained) {
-                 map.setView(latlng, Math.max(map.getZoom(), 16));
-                 firstLocationObtained = true;
-                 console.log("Primera localización obtenida. Mapa centrado.");
-            } else {
-                 console.log("Localización actualizada.");
-            }
+             // Guardar la última localización conocida
+             lastKnownLocation = e.latlng;
+             console.log(`Localización encontrada: Lat ${e.latlng.lat}, Lng ${e.latlng.lng}, Precisión ${radius.toFixed(0)}m.`);
 
+             if (!firstLocationObtained) {
+                  // Centrar el mapa solo la primera vez que se obtiene la localización con buena precisión
+                  // Considerar un umbral de precisión para el centrado automático inicial
+                   const centeringAccuracyThreshold = 50; // metros
+                   if (radius <= centeringAccuracyThreshold) {
+                        map.setView(e.latlng, Math.max(map.getZoom(), 16)); // Centra y ajusta zoom mínimo a 16
+                        console.log(`Centrado automático inicial en la localización con precisión <= ${centeringAccuracyThreshold}m.`);
+                         if (!loadingStatusDiv.textContent.startsWith('Error:') && loadingStatusDiv.textContent.includes('buscando localización')) {
+                              loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', 'Localización encontrada. Selecciona una parcela.');
+                         } else if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                              loadingStatusDiv.textContent += ' Localización encontrada.';
+                         }
+                        firstLocationObtained = true; // Marcar que ya se centró automáticamente la primera vez
+                   } else {
+                        console.log(`Localización encontrada, pero la precisión (${radius.toFixed(0)}m) es mayor que el umbral de centrado automático (${centeringAccuracyThreshold}m). No se centrará automáticamente.`);
+                         if (!loadingStatusDiv.textContent.startsWith('Error:') && loadingStatusDiv.textContent.includes('buscando localización')) {
+                              loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', `Localización encontrada (${radius.toFixed(0)}m). Selecciona una parcela.`);
+                         } else if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                              loadingStatusDiv.textContent += ` Localización encontrada (${radius.toFixed(0)}m).`;
+                         }
+                   }
 
-             if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
-                 if (selectedLayer) {
-                     loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Parcela seleccionada.';
-                 } else {
-                      loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una parcela.';
-                 }
-
+             } else {
+                 // Para actualizaciones posteriores, solo actualizar el marcador y círculo
+                  console.log(`Actualización de localización: Lat ${e.latlng.lat}, Lng ${e.latlng.lng}, Precisión ${radius.toFixed(0)}m.`);
+                   // Opcional: actualizar el texto de estado si no está mostrando un error
+                   if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Generando pasadas')) {
+                         if (loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                              loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace(/\(.*\)/, `(${radius.toFixed(0)}m)`); // Actualizar precisión si ya se mostraba
+                         } else {
+                             loadingStatusDiv.textContent += ` Localización encontrada (${radius.toFixed(0)}m).`;
+                         }
+                   }
              }
-
 
         }
 
+        // Función que se ejecuta si hay un error de localización
         function onLocationError(e) {
-            console.error(`Error de localización (${e.code}): ${e.message}`);
-            watchingLocation = false;
-
-            let errorMessage = "Error al obtener la localización: ";
-
-            switch (e.code) {
-                case 1:
-                    errorMessage += "Permiso denegado.";
-                    alert("Para mostrar tu posición, por favor permite el acceso a la geolocalización.");
-                    break;
-                case 2:
-                    errorMessage += "Posición no disponible.";
-                     alert("Tu posición no está disponible (señal GPS débil o desactivado).");
-                    break;
-                case 3:
-                    errorMessage += "Tiempo de espera agotado.";
-                     alert("Tiempo de espera agotado al buscar tu localización. Asegúrate de tener buena señal GPS.");
-                    break;
-                default:
-                    errorMessage += `Error desconocido: ${e.message}`;
-                     alert(errorMessage + " Revisa la consola para más detalles.");
-                    break;
-            }
-             if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                  loadingStatusDiv.textContent = 'Datos iniciales cargados. ' + errorMessage;
-             }
-
-             if (locationMarker) {
-                map.removeLayer(locationMarker);
-                locationMarker = null;
-             }
-             if (accuracyCircle) {
-                map.removeLayer(accuracyCircle);
-                accuracyCircle = null;
-             }
-             lastKnownLocation = null;
+             watchingLocation = false; // Marcar que watchPosition ya no está activo (en caso de error grave)
+            console.error("Error de localización:", e.message);
+             // Mostrar un mensaje de error en el indicador de estado
+             loadingStatusDiv.textContent = `Error de localización: ${e.message}. Selecciona una parcela manualmente.`;
+            alert(`Error de localización: ${e.message}. Por favor, asegúrate de que la geolocalización esté activada en tu dispositivo y navegador.`);
+             generarPasadasBtn.disabled = false; // Asegurarse de que el botón no quede deshabilitado permanentemente
         }
-        // --- Fin Lógica de Localización GPS ---
+
+         // Función para iniciar la geolocalización (llamada al cargar el DOM y al pulsar el botón si no hay posición)
+        function locateUser() {
+             if (navigator.geolocation) {
+                 if (!watchingLocation) {
+                     console.log("Intentando iniciar navigator.geolocation.watchPosition...");
+                     watchingLocation = true;
+                     navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
+                         enableHighAccuracy: true,
+                         timeout: 10000,
+                         maximumAge: 0
+                     });
+                 } else {
+                      console.log("navigator.geolocation.watchPosition ya está activo.");
+                 }
+            } else {
+                 console.log("La geolocalización no es soportada por este navegador.");
+                 onLocationError({ message: "Geolocalización no soportada por el navegador." }); // Llamar a la función de error con un mensaje
+             }
+        }
 
         // --- Event Listener para el botón de localización ---
         locateButton.addEventListener('click', function() {
             console.log("Botón de localización pulsado.");
             if (lastKnownLocation) {
-                 map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                 // Si ya tenemos una última posición, centrar el mapa en ella
+                 map.setView(lastKnownLocation, Math.max(map.getZoom(), 16)); // Centra y ajusta zoom mínimo a 16
                  console.log("Centrando mapa en la última localización conocida al pulsar el botón.");
                  if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                        loadingStatusDiv.textContent = 'Datos iniciales cargados. Mapa centrado en tu posición.';
                  }
 
             } else {
+                 // Si no hay localización conocida, intentar localizar al usuario
                  console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
                  locateUser();
                  if (!loadingStatusDiv.textContent.startsWith('Error:')) {
@@ -1701,6 +1443,7 @@
         console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
         console.log("La carga automática de datos geoespaciales iniciales (Parcelas, Curvas Nivel, MDT) comenzará al terminar de cargar el DOM.");
         console.log("La búsqueda de localización GPS se iniciará al cargar el DOM si el navegador lo soporta.");
+
 
     </script>
 
