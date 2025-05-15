@@ -7,8 +7,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
-
-    <style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"> <style>
         /* Estilos por defecto para pantallas más grandes */
         #map {
             height: 500px;
@@ -47,6 +46,40 @@
              color: #555;
          }
 
+        /* --- Estilos para el botón de localización --- */
+        .leaflet-control-locate {
+            position: absolute;
+            z-index: 1000; /* Asegúrate de que esté por encima del mapa */
+            bottom: 20px; /* Ajusta la posición vertical desde abajo */
+            left: 50%; /* Centra horizontalmente */
+            transform: translateX(-50%); /* Ajusta para centrar exactamente */
+            /* Considera posicionarlo en una esquina si prefieres */
+            /* bottom: 20px; right: 20px; left: auto; transform: none; */
+        }
+
+        .leaflet-control-locate button {
+            background-color: #fff;
+            border: 2px solid rgba(0,0,0,0.2);
+            background-clip-padding: padding-box;
+            min-width: 30px;
+            min-height: 30px;
+            line-height: 30px;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+            text-decoration: none;
+            color: #333;
+            cursor: pointer;
+            border-radius: 2px;
+        }
+         .leaflet-control-locate button i {
+             font-size: 1.2em;
+             width: 1em; /* Asegura que el icono tenga un ancho definido */
+             height: 1em; /* Asegura que el icono tenga un alto definido */
+             line-height: 1em; /* Centra el icono verticalmente */
+         }
+
+
         /* --- Estilos para dispositivos móviles --- */
         @media (max-width: 600px) {
             #map {
@@ -71,6 +104,14 @@
              .control-container input[type="number"] {
                  width: 95%; /* Ajusta el ancho para el input number */
             }
+
+             /* Ajusta la posición del botón de localización en móvil si es necesario */
+            .leaflet-control-locate {
+                bottom: 10px; /* Más abajo en móvil */
+                 /* Mantener centrado horizontalmente o mover a esquina */
+                 /* right: 10px; left: auto; transform: none; */
+            }
+
         }
         /* --- Fin Estilos para dispositivos móviles --- */
 
@@ -89,6 +130,12 @@
     <div class="container">
         <div id="map"></div>
     </div>
+
+    <div class="leaflet-control leaflet-control-locate">
+        <button id="locateButton" title="Centrar en mi ubicación">
+            <i class="fas fa-location-arrow"></i> </button>
+    </div>
+
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
@@ -120,12 +167,14 @@
         // --- Variables para localización GPS ---
         let locationMarker = null;
         let accuracyCircle = null;
-        let firstLocationObtained = false; // Flag para saber si es la primera vez que obtenemos localización
+        let lastKnownLocation = null; // Variable para guardar la última posición conocida
+        let watchingLocation = false; // Flag para saber si watchPosition está activo
 
         // --- Elementos de la interfaz ---
         const generarPasadasBtn = document.getElementById('generarPasadasBtn');
         const workingWidthInput = document.getElementById('workingWidth');
         const loadingStatusDiv = document.getElementById('loading-status'); // Referencia al indicador de carga
+        const locateButton = document.getElementById('locateButton'); // Referencia al nuevo botón
 
         // --- Capas base ---
         // Capa Minimalista (Se mantiene)
@@ -199,8 +248,32 @@
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
             // --- Iniciar localización GPS (independiente de la carga de datos geoespaciales) ---
-            locateUser();
-            loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+             // Solo iniciamos watchPosition una vez al cargar si el navegador lo soporta
+             if (navigator.geolocation) {
+                 if (!watchingLocation) {
+                     console.log("Iniciando observación de localización GPS...");
+                     watchingLocation = true; // Marca que watchPosition está activo
+                     navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
+                         enableHighAccuracy: true,
+                         timeout: 10000,
+                         maximumAge: 0
+                     });
+                     loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+
+                 } else {
+                     console.log("watchPosition ya está activo.");
+                      if (lastKnownLocation) {
+                           loadingStatusDiv.textContent += ' Localización encontrada.';
+                      } else {
+                           loadingStatusDiv.textContent += ' Buscando localización...';
+                      }
+                 }
+             } else {
+                 console.log("Tu navegador no soporta geolocalización.");
+                 loadingStatusDiv.textContent += ' Error: Geolocalización no soportada.';
+                 alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria.");
+             }
+
 
             // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
             const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
@@ -441,12 +514,16 @@
                       map.setView([36.7462, -5.1612], 14); // Fallback
                 }
 
-                // Actualizar el mensaje de estado solo si no hay errores de carga de datos
-                if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.startsWith('Advertencia:')) {
-                     if (!firstLocationObtained) {
-                          loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                // Actualizar el mensaje de estado solo si no hay errores de carga de datos y watchPosition ya se intentó iniciar
+                if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
+                     if (watchingLocation) {
+                           if (lastKnownLocation) {
+                               loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+                           } else {
+                                loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                           }
                      } else {
-                          loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+                         loadingStatusDiv.textContent = 'Datos cargados. Geolocalización no soportada o no iniciada.';
                      }
                 }
 
@@ -789,7 +866,7 @@
                                        if (areaCalculated === 0) {
                                             console.log("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar (área limpia = 0).");
                                             alert("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar. No se pueden generar pasadas útiles.");
-                                            console.log("Revertiendo a geometría original de la parcela según la lógica actual.");
+                                            console.log("Revirtiendo a geometría original de la parcela según la lógica actual.");
                                             geometryForCalculations = parcelGeometry;
                                        } else {
                                              console.warn("Advertencia: El área limpia resultante no es una geometría válida para generar pasadas.");
@@ -1294,4 +1371,189 @@
                 console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
-               console.error("Error general durante la generación de pas
+               console.error("Error general durante la generación de pasadas:", e);
+               console.error("Parcel Geometry (inicio):", JSON.stringify(parcelGeometry));
+               if (typeof geometryForCalculations !== 'undefined') {
+                    console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
+               }
+                if (typeof finalGeometryToSweep !== 'undefined') {
+                    console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryToSweep));
+               }
+                if (typeof geometryForSweepAndPiP !== 'undefined') {
+                     console.error("Geometry For Sweep And PiP (polígono más grande):", JSON.stringify(geometryForSweepAndPiP));
+                }
+
+               alert("Ocurrió un error al generar las pasadas. Revisa la consola para detalles.");
+           }
+        });
+
+        // --- Lógica de Localización GPS ---
+        function locateUser() {
+            // Comprobar si el navegador soporta la API de Geolocation
+            if (!navigator.geolocation) {
+                console.log("Tu navegador no soporta geolocalización.");
+                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                      loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
+                 }
+                alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria para mostrar tu posición.");
+                return;
+            }
+
+            // Si ya estamos observando, no iniciar otro watchPosition
+            if (watchingLocation) {
+                 console.log("watchPosition ya está activo.");
+                 // Si ya tenemos una localización, centrar el mapa
+                 if (lastKnownLocation) {
+                      map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                      console.log("Centrando mapa en la última localización conocida.");
+                       if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                          loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+                       }
+                 } else {
+                     console.log("watchPosition activo, pero aún sin localización. Esperando...");
+                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                           loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                      }
+                 }
+                 return;
+            }
+
+            console.log("Iniciando observación de localización GPS...");
+            watchingLocation = true; // Marca que watchPosition está activo
+            navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
+                enableHighAccuracy: true, // Solicitar la mejor precisión posible
+                timeout: 15000,           // Tiempo máximo para esperar una respuesta (aumentado a 15 segundos)
+                maximumAge: 0             // No usar una posición cacheada, siempre intentar obtener una nueva
+            });
+
+            if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                loadingStatusDiv.textContent = 'Cargando datos geoespaciales y buscando localización...';
+            }
+
+        }
+
+        function onLocationFound(e) {
+            const radius = e.coords.accuracy; // Precisión del GPS en metros
+            const latlng = L.latLng(e.coords.latitude, e.coords.longitude);
+            lastKnownLocation = latlng; // Guardar la última posición
+
+            console.log(`Localización GPS encontrada: Lat ${latlng.lat}, Lng ${latlng.lng}, Precisión ${radius} m`);
+
+            // Eliminar el marcador y el círculo de precisión anteriores si existen
+            if (locationMarker) {
+                map.removeLayer(locationMarker);
+            }
+            if (accuracyCircle) {
+                map.removeLayer(accuracyCircle);
+            }
+
+            // Añadir un marcador para la ubicación actual (punto azul)
+            // Usamos un círculo simple en lugar de un marcador para simular el punto azul común
+            locationMarker = L.circleMarker(latlng, {
+                radius: 8,
+                color: '#0055FF',
+                fillColor: '#0055FF',
+                fillOpacity: 1
+            }).addTo(map);
+
+            // Añadir un círculo para mostrar la precisión
+            accuracyCircle = L.circle(latlng, radius, {
+                 color: '#136AEC',    // Color del borde
+                 fillColor: '#136AEC', // Color de relleno azul
+                 fillOpacity: 0.15,     // Transparencia
+                 weight: 2             // Grosor del borde
+            }).addTo(map);
+
+            // Centrar el mapa en la ubicación encontrada solo la primera vez
+            // Después, solo actualizamos la vista si el usuario pulsa el botón
+            if (!firstLocationObtained) {
+                 map.setView(latlng, Math.max(map.getZoom(), 16)); // Centra y ajusta zoom si es necesario
+                 firstLocationObtained = true; // Marca que ya obtuvimos la primera localización
+                 console.log("Primera localización obtenida. Mapa centrado.");
+            } else {
+                 // Si no es la primera vez, solo actualizamos el marcador y círculo
+                 console.log("Localización actualizada.");
+            }
+
+
+             // Actualizar el estado de carga
+             if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
+                 loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+             }
+
+
+        }
+
+        function onLocationError(e) {
+            console.error(`Error de localización (${e.code}): ${e.message}`);
+            watchingLocation = false; // watchPosition dejó de funcionar o no se pudo iniciar
+
+            let errorMessage = "Error al obtener la localización: ";
+
+            switch (e.code) {
+                case 1:
+                    errorMessage += "Permiso denegado. Para mostrar tu posición, permite el acceso a la geolocalización.";
+                    alert("Para mostrar tu posición, por favor permite el acceso a la geolocalización en la configuración de tu navegador.");
+                    break;
+                case 2:
+                    errorMessage += "Posición no disponible. Asegúrate de tener buena señal GPS.";
+                     alert("Tu posición no está disponible (señal GPS débil o desactivado).");
+                    break;
+                case 3:
+                    errorMessage += "Tiempo de espera agotado.";
+                     alert("Tiempo de espera agotado al buscar tu localización. Asegúrate de tener buena señal GPS.");
+                    break;
+                default:
+                    errorMessage += `Error desconocido: ${e.message}`;
+                     alert(errorMessage + " Revisa la consola para más detalles.");
+                    break;
+            }
+             // Solo actualiza el estado si no hay un error de carga de datos fatal
+             if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                  loadingStatusDiv.textContent = 'Datos cargados. ' + errorMessage;
+             }
+
+             // Eliminar el marcador y círculo si hubo un error
+             if (locationMarker) {
+                map.removeLayer(locationMarker);
+                locationMarker = null;
+             }
+             if (accuracyCircle) {
+                map.removeLayer(accuracyCircle);
+                accuracyCircle = null;
+             }
+             lastKnownLocation = null; // Limpiar la última posición conocida
+        }
+        // --- Fin Lógica de Localización GPS ---
+
+        // --- Event Listener para el botón de localización ---
+        locateButton.addEventListener('click', function() {
+            console.log("Botón de localización pulsado.");
+            if (lastKnownLocation) {
+                 // Si ya tenemos una localización, simplemente centramos el mapa en ella
+                 map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                 console.log("Centrando mapa en la última localización conocida al pulsar el botón.");
+                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                       loadingStatusDiv.textContent = 'Datos cargados. Mapa centrado en tu posición.';
+                 }
+
+            } else {
+                 // Si no tenemos una localización o watchPosition no está activo, intentar iniciar/reiniciar
+                 console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
+                 locateUser(); // Llamar a la función que inicia watchPosition
+                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                       loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                 }
+            }
+        });
+
+
+        // --- LOGS INICIALES ---
+        console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
+        console.log("La carga automática de datos geoespaciales comenzará al terminar de cargar el DOM.");
+        console.log("La búsqueda de localización GPS se iniciará al cargar el DOM si el navegador lo soporta.");
+
+    </script>
+
+</body>
+</html>
