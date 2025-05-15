@@ -136,7 +136,6 @@
             <i class="fas fa-location-arrow"></i> </button>
     </div>
 
-
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
     <script>
@@ -146,6 +145,17 @@
         } else {
              console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
         }
+        // Eliminamos las verificaciones de GeoTIFF por ahora
+        /*
+         console.log("Estado de 'GeoTIFF' inmediatamente después del script tag:", typeof GeoTIFF);
+        if (typeof GeoTIFF === 'undefined') {
+             console.error("VERIFICACIÓN: 'GeoTIFF' es undefined justo después del script tag. El script de GeoTIFF.js NO se cargó o ejecutó como se esperaba.");
+        } else {
+             console.log("VERIFICACIÓN: 'GeoTIFF' parece estar definido. Tipo:", typeof GeoTIFF);
+        }
+        */
+        // Si necesitas proj4js, descomenta la línea y verifica su estado similarmente.
+        // console.log("Estado de 'proj4' inmediatamente después del script tag:", typeof proj4);
     </script>
 
 
@@ -157,15 +167,19 @@
         let selectedLayer = null; // Variable para almacenar la capa (parcela) que está seleccionada
         let originalStyle = {}; // Variable para guardar el estilo original de cada capa de parcela
         let parcelasLayer = null; // Capa para parcelas (seleccionable)
-        let construccionesLayer = null; // Capa para construcciones (exclusión)
-        let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
-        let curvasNivelLayer = null; // Variable para la capa de curvas de nivel
-        let mdtLayer = null; // Variable para la capa del MDT (aunque no se use para cálculo de pendiente automática)
 
-        // Variables para almacenar features brutos después de cargar (sin buffering inmediato de líneas)
-        let rawConstruccionesFeatures = [];
-        let rawElementosInternosFeatures = [];
+        // Variables para almacenar las features GeoJSON crudas (sin buffer/procesar inicialmente)
+        let construccionesFeatures = [];
+        let elementosInternosFeatures = [];
+        let curvasNivelFeatures = []; // Guardar también las de curvas de nivel si se necesitan más adelante
 
+        // Variables para las capas de visualización de las features crudas
+        let construccionesLayer = null;
+        let elementosInternosLayer = null;
+        let curvasNivelLayer = null; // Variable para la capa de curvas de nivel para visualización
+
+        // Eliminamos la variable mdtImage
+        // let mdtImage = null;
 
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
@@ -174,7 +188,8 @@
         let accuracyCircle = null;
         let lastKnownLocation = null; // Variable para guardar la última posición conocida
         let watchingLocation = false; // Flag para saber si watchPosition está activo
-        let firstLocationObtained = false; // Flag para saber si ya se obtuvo la primera localización
+        let firstLocationObtained = false; // Flag para saber si es la primera vez que obtenemos localización
+
 
         // --- Elementos de la interfaz ---
         const generarPasadasBtn = document.getElementById('generarPasadasBtn');
@@ -232,7 +247,8 @@
         const overlayLayers = {
              "Cartografía Catastral (WMS)": catastroLayer,
              "Pasadas Generadas": generatedPassesLayer
-             // Las capas GeoJSON y MDT se añadirán aquí después de cargarse
+             // Las capas GeoJSON se añadirán aquí después de cargarse
+             // Eliminamos la capa MDT
         };
 
         let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
@@ -246,14 +262,13 @@
              layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
         }
 
-        // --- Carga automática de los 4 archivos (3 GeoJSONs y 1 TIFF) al cargar la página ---
+        // --- Carga automática de los 3 archivos GeoJSON al cargar la página ---
         document.addEventListener('DOMContentLoaded', function() {
             console.log("El DOM está cargado. Iniciando carga automática de datos geoespaciales.");
-            console.log("Estado de rawConstruccionesFeatures y rawElementosInternosFeatures al inicio:", rawConstruccionesFeatures.length, rawElementosInternosFeatures.length);
             loadingStatusDiv.textContent = 'Cargando datos geoespaciales...';
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
-            // --- Iniciar localización GPS (independiente de la carga de datos geoespaciales) ---
+            // --- Iniciar localización GPS (independiente de la carga de datos geoespacial) ---
              // Solo iniciamos watchPosition una vez al cargar si el navegador lo soporta
              if (navigator.geolocation) {
                  if (!watchingLocation) {
@@ -261,23 +276,30 @@
                      watchingLocation = true; // Marca que watchPosition está activo
                      navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
                          enableHighAccuracy: true,
-                         timeout: 10000,
+                         timeout: 15000,
                          maximumAge: 0
                      });
-                     loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+                     if (!loadingStatusDiv.textContent.includes('buscando localización')) {
+                        loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+                     }
 
                  } else {
                      console.log("watchPosition ya está activo.");
                       if (lastKnownLocation) {
-                           loadingStatusDiv.textContent += ' Localización encontrada.';
+                           if (!loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                                loadingStatusDiv.textContent += ' Localización encontrada.';
+                           }
                       } else {
-                           loadingStatusDiv.textContent += ' Buscando localización...';
+                           if (!loadingStatusDiv.textContent.includes('buscando localización')) {
+                               loadingStatusDiv.textContent += ' Buscando localización...';
+                           }
                       }
                  }
              } else {
                  console.log("Tu navegador no soporta geolocalización.");
-                 loadingStatusDiv.textContent += ' Error: Geolocalización no soportada.';
-                 alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria.");
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Geolocalización no soportada')) {
+                      loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
+                 }
              }
 
 
@@ -286,14 +308,14 @@
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
-            const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - Corregida para CORS
+            // Eliminamos la URL del MDT
+            // const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif';
              // *** FIN URLs ***
 
              const units = 'meters'; // Unidades para Turf.js (buffer)
-             // const bufferDistanceForLines = 2; // Ya no se usa aquí, se aplica en el click del botón
+             const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
 
-            // Usar Promise.all para cargar los archivos concurrentemente
-            // Incluimos el fetch del GeoJSON de curvas de nivel y el TIFF del MDT
+            // Usar Promise.all para cargar solo los 3 archivos GeoJSON
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
                      if (!response.ok) throw new Error(`Error al cargar Parcelas: ${response.statusText}`);
@@ -311,17 +333,11 @@
                  fetch(curvasNivelGeojsonDataUrl).then(response => {
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
-                 }),
-                 // Nueva promesa para intentar cargar el MDT (TIFF) - no se usa para cálculo de pendiente automática en este código
-                 fetch(mdtGeoTiffDataUrl).then(response => {
-                      if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
-                       // Para TIFF, simplemente retornamos la respuesta para saber que se cargó (o no)
-                       console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                      return response; // No procesamos el contenido aquí para este código
                  })
+                 // Eliminamos la promesa del MDT
             ])
-            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => { // Añadir los parámetros correspondientes
-                console.log("Los archivos GeoJSON y MDT se cargaron con éxito (primer paso de fetch/json/response).");
+            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData]) => { // Ajustamos los parámetros recibidos
+                console.log("Los archivos GeoJSON se cargaron con éxito.");
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
                 console.log("Inspeccionando y cargando capa de Parcelas...");
@@ -351,63 +367,50 @@
                      console.log(`Parcelas cargadas en Leaflet. Número de features en datos brutos: ${parcelasGeojsonData.features.length}`);
                  } else {
                      console.error("Datos de Parcelas no son un FeatureCollection válido o están vacíos.", parcelasGeojsonData);
-                      loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.'; // Sobrescribir si hay error de carga de datos
+                      // Sobrescribir si hay error de carga de datos principal
+                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                          loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.';
+                      }
                      alert("Error: El archivo de Parcelas no contiene un FeatureCollection válido. No se pueden cargar las parcelas.");
                  }
 
 
-                // --- Inspeccionar, cargar capa de Construcciones y almacenar features brutos ---
-                console.log("Inspeccionando, cargando capa de Construcciones y almacenando features brutos...");
+                // --- Inspeccionar, cargar capa de Construcciones y ALMACENAR features ---
+                console.log("Inspeccionando, cargando capa de Construcciones y almacenando features...");
                  if (construccionesGeojsonData && construccionesGeojsonData.type === 'FeatureCollection' && Array.isArray(construccionesGeojsonData.features)) {
-                      construccionesLayer = L.geoJSON(construccionesGeojsonData, {
-                          style: feature => ({ color: '#FF0000', weight: 2, fillColor: '#FF0000', fillOpacity: 0.5 }),
-                           onEachFeature: (feature, layer) => {
-                               // Almacenar la feature bruta (Polígono/MultiPolígono) sin modificar
-                                if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
-                                  const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                   rawConstruccionesFeatures.push(clonedFeature);
-                              } else {
-                                   console.warn("Geometría de construcción no es Polígono/MultiPolígono válido. No se almacenará como feature bruta para exclusión:", feature.geometry);
-                              }
-                           }
-                      }).addTo(map);
-                      overlayLayers["Construcciones"] = construccionesLayer;
-                       console.log(`Construcciones cargadas en Leaflet. Número de features en datos brutos: ${construccionesGeojsonData.features.length}. Se almacenaron ${rawConstruccionesFeatures.length} features brutos.`);
+                      construccionesFeatures = construccionesGeojsonData.features; // ALMACENAR features crudas
+                       construccionesLayer = L.geoJSON(construccionesGeojsonData, { // Crear capa solo para visualización
+                           style: feature => ({ color: '#FF0000', weight: 2, fillColor: '#FF0000', fillOpacity: 0.5 })
+                       }).addTo(map);
+                       overlayLayers["Construcciones"] = construccionesLayer;
+                       console.log(`Construcciones cargadas en Leaflet y features almacenadas. Número de features: ${construccionesFeatures.length}.`);
                  } else {
-                     console.warn("Datos de Construcciones no son un FeatureCollection válido o están vacíos. No se cargarán construcciones ni se almacenarán features brutos.", construccionesGeojsonData);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
+                     console.warn("Datos de Construcciones no son un FeatureCollection válido o están vacíos. No se cargarán construcciones ni almacenarán features.", construccionesGeojsonData);
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) { // Solo añadir si no hay error de carga de datos principal
                           loadingStatusDiv.textContent += ' Advertencia: Datos de Construcciones inválidos.';
                        }
                  }
 
 
-                // --- Inspeccionar, cargar capa de Elementos Internos y almacenar features brutos (LineStrings sin buffer) ---
-                 console.log("Inspeccionando, cargando capa de Elementos Internos y almacenando features brutos...");
+                // --- Inspeccionar, cargar capa de Elementos Internos y ALMACENAR features ---
+                 console.log("Inspeccionando, cargando capa de Elementos Internos y almacenando features...");
                   if (elementosInternosGeojsonData && elementosInternosGeojsonData.type === 'FeatureCollection' && Array.isArray(elementosInternosGeojsonData.features)) {
-                       elementosInternosLayer = L.geoJSON(elementosInternosGeojsonData, {
-                           style: feature => {
-                                if (feature.geometry && feature.geometry.type === 'LineString') {
-                                     return { color: '#0000FF', weight: 2, opacity: 0.8 };
-                                } else if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
-                                     return { color: '#006400', weight: 1, fillColor: '#006400', fillOpacity: 0.3 };
-                                }
-                                return { color: '#888888', weight: 1, opacity: 0.5 };
-                           },
-                           onEachFeature: (feature, layer) => {
-                               // Almacenar la feature bruta (LineString, Polígono, etc.) sin buffering
-                               if (feature.geometry) {
-                                   const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                   rawElementosInternosFeatures.push(clonedFeature);
-                               } else {
-                                   console.warn("Geometría de Elemento Interno nula o indefinida. No se almacenará como feature bruta:", feature);
-                               }
-                           }
+                       elementosInternosFeatures = elementosInternosGeojsonData.features; // ALMACENAR features crudas
+                       elementosInternosLayer = L.geoJSON(elementosInternosGeojsonData, { // Crear capa solo para visualización
+                            style: feature => {
+                                 if (feature.geometry && feature.geometry.type === 'LineString') {
+                                      return { color: '#0000FF', weight: 2, opacity: 0.8 };
+                                 } else if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+                                      return { color: '#006400', weight: 1, fillColor: '#006400', fillOpacity: 0.3 };
+                                 }
+                                 return { color: '#888888', weight: 1, opacity: 0.5 };
+                            }
                        }).addTo(map);
-                       overlayLayers["Viales y Arroyos"] = elementosInternosLayer; // Añadido de nuevo al control de capas
-                       console.log(`Elementos Internos cargados en Leaflet. Número de features en datos brutos: ${elementosInternosGeojsonData.features.length}. Se almacenaron ${rawElementosInternosFeatures.length} features brutos.`);
+                       overlayLayers["Viales y Arroyos"] = elementosInternosLayer; // Añadido al control de capas
+                       console.log(`Elementos Internos cargados en Leaflet y features almacenadas. Número de features: ${elementosInternosFeatures.length}.`);
                   } else {
-                      console.warn("Datos de Elementos Internos no son un FeatureCollection válido o están vacíos. No se cargarán elementos internos ni se almacenarán features brutos.", elementosInternosGeojsonData);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
+                      console.warn("Datos de Elementos Internos no son un FeatureCollection válido o están vacíos. No se cargarán elementos internos ni almacenarán features.", elementosInternosGeojsonData);
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) { // Solo añadir si no hay error de carga de datos principal
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Viales/Arroyos inválidos.';
                        }
                  }
@@ -415,7 +418,8 @@
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
                   if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
-                       curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
+                       curvasNivelFeatures = curvasNivelGeojsonData.features; // ALMACENAR features crudas
+                       curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, { // Capa solo para visualización
                            style: function(feature) {
                                 // Estilo para las curvas de nivel: color marrón, grosor y opacidad
                                 return {
@@ -459,36 +463,19 @@
 
                        // Añadir la nueva capa al control de capas
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
-                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
+                       console.log(`Curvas de Nivel cargadas en Leaflet y features almacenadas. Número de features: ${curvasNivelFeatures.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas ni almacenarán features.", curvasNivelGeojsonData);
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) { // Solo añadir si no hay error de carga de datos principal
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
                  }
                 // --- Fin del código para curvas de nivel ---
 
-                // --- Código para manejar la carga del MDT (TIFF) - No se crea una capa visible por defecto ---
-                 console.log("Intento de carga de MDT (TIFF) completado.");
-                 // Puedes añadir aquí código para procesar el TIFF si tuvieras una librería JS capaz de hacerlo,
-                 // o simplemente usar esta confirmación de carga para saber que el archivo existe en la URL.
-                 if (mdtTiffResponse && mdtTiffResponse.ok) {
-                      console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
-                      // Aquí podrías añadir una capa de TileLayer si tuvieras un servidor sirviendo el MDT como teselas WMS/XYZ
-                      // o usar una librería como geotiff.js para leer el ráster si es necesario para futuros desarrollos de análisis.
-                 } else {
-                      console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
-                          loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar MDT TIFF.';
-                       }
-                 }
-                // --- Fin código MDT ---
-
-
-                 console.log(`Total features brutos de Construcciones almacenados: ${rawConstruccionesFeatures.length}`);
-                 console.log(`Total features brutos de Elementos Internos almacenados: ${rawElementosInternosFeatures.length}`);
-                 console.log("Estado de rawConstruccionesFeatures y rawElementosInternosFeatures DESPUÉS de la carga:", rawConstruccionesFeatures.length, rawElementosInternosFeatures.length);
+                 console.log(`Total features de Construcciones almacenadas: ${construccionesFeatures.length}`);
+                 console.log(`Total features de Elementos Internos almacenadas: ${elementosInternosFeatures.length}`);
+                 console.log(`Total features de Curvas de Nivel almacenadas: ${curvasNivelFeatures.length}`);
 
 
                  // Actualizar el control de capas con las nuevas capas cargadas
@@ -502,7 +489,7 @@
                       map.setView([36.7462, -5.1612], 14); // Fallback
                 }
 
-                // Actualizar el mensaje de estado solo si no hay errores de carga de datos y watchPosition ya se intentó iniciar
+                // Actualizar el mensaje de estado solo si no hay errores/advertencias previos
                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                      if (watchingLocation) {
                            if (lastKnownLocation) {
@@ -511,9 +498,28 @@
                                 loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
                            }
                      } else {
-                         loadingStatusDiv.textContent = 'Datos cargados. Geolocalización no soportada o no iniciada.';
+                         loadingStatusDiv.textContent = 'Datos cargados. Geolocalización no soportada.';
                      }
+                } else if (loadingStatusDiv.textContent.includes('Cargando datos geoespaciales...')) {
+                     // Si se añadió el mensaje de localización al inicio y hubo errores/advertencias después
+                      if (watchingLocation) {
+                           if (lastKnownLocation) {
+                               loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Cargando datos geoespaciales...', 'Datos geoespaciales (con problemas)...');
+                                loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('y buscando localización...', '. Localización encontrada.');
+                           } else {
+                                loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Cargando datos geoespaciales...', 'Datos geoespaciales (con problemas)...');
+                           }
+                     } else {
+                          loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Cargando datos geoespaciales...', 'Datos geoespaciales (con problemas)...');
+                     }
+                } else if (loadingStatusDiv.textContent === 'Cargando datos geoespaciales...') {
+                     // Si no se inició localización y solo hubo mensaje de carga inicial
+                      loadingStatusDiv.textContent = 'Datos geoespaciales cargados (con problemas).';
+                } else if (loadingStatusDiv.textContent.includes('Buscando localización') && !loadingStatusDiv.textContent.startsWith('Error:')) {
+                    // Si hay un error de localización pero la carga de datos no tuvo errores fatales
+                     loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', 'Error al obtener localización.');
                 }
+
 
                 console.log("Carga automática de datos finalizada. Selecciona una parcela para habilitar la generación de pasadas.");
 
@@ -523,14 +529,15 @@
                 console.error("Error durante la carga automática de datos geoespaciales:", error);
                 // Sobrescribir el estado de carga si hay un error fatal en la carga de datos
                 loadingStatusDiv.textContent = `Error al cargar datos: ${error.message}`;
-                alert(`Ocurrió un error al cargar uno o más archivos geoespaciales. Revisa las URLs y la consola para más detalles. Error: ${error.message}`);
+                alert(`Ocurrió un error al cargar uno o más archivos geoespaciales. Revisa las URLs y la consola para más detalles.`);
             });
         });
 
 
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS ---
 
-        generarPasadasBtn.addEventListener('click', function() {
+        generarPasadasBtn.addEventListener('click', function() { // Cambiado de async a función normal
+
 
             // --- VERIFICACIÓN DE TURF ---
             console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
@@ -541,8 +548,8 @@
             }
             // --- FIN VERIFICACIÓN ---
 
+
             console.log("--- Inicio Generación de Pasadas ---");
-            console.log("Estado de rawConstruccionesFeatures y rawElementosInternosFeatures al inicio del click:", rawConstruccionesFeatures.length, rawElementosInternosFeatures.length);
 
 
             // Asegurarse de que haya una parcela seleccionada y sea un polígono válido
@@ -555,6 +562,8 @@
             const selectedParcelGeoJSON = selectedLayer.toGeoJSON();
             let parcelGeometry = selectedParcelGeoJSON.geometry; // Geometría de la parcela seleccionada
             const parcelFeature = turf.feature(parcelGeometry); // La parcela como feature para intersecciones
+            // Eliminamos parcelBbox aquí, ya que se calculará dentro del bucle de exclusión para cada feature por separado
+
 
             generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores
             console.log("Limpiando pasadas generadas anteriormente.");
@@ -569,845 +578,876 @@
             // --- Fin Obtener ancho de trabajo ---
 
             const units = 'meters'; // Unidades para Turf.js
-            const bufferDistanceForLines = 2; // Distancia de buffer para LineStrings (se aplica AHORA)
+            const bufferDistanceForLines = 2; // Distancia de buffer para LineStrings
+
+            let intersectingExclusionFeatures = []; // Array LOCAL para almacenar las FEATURES de exclusión que INTERSECTAN con la parcela seleccionada
 
 
-            let currentParcelExclusions = []; // Array LOCAL para almacenar las FEATURES de exclusión relevantes para ESTA parcela
+            try {
+                 // --- Recopilar y bufferizar solo las features de exclusión que intersectan con la parcela seleccionada ---
+                 console.log("Recopilando y procesando features de exclusión que intersectan con la parcela seleccionada...");
 
-            console.log("Identificando y procesando features de exclusión que intersectan con la parcela seleccionada...");
-
-            // --- Procesar Construcciones ---
-            rawConstruccionesFeatures.forEach((construccionFeature, index) => {
-                 if (construccionFeature.geometry && (construccionFeature.geometry.type === 'Polygon' || construccionFeature.geometry.type === 'MultiPolygon')) {
-                      try {
-                           if (turf.booleanIntersects(parcelFeature, construccionFeature)) {
-                               currentParcelExclusions.push(construccionFeature); // Añadir la feature de polígono de construcción
-                               // console.log(`Construcción #${index} interseca y se añade como exclusión.`); // Log detallado
-                           }
-                      } catch (e) {
-                          console.warn(`Error al verificar intersección para Construcción #${index}. Se omitirá.`, construccionFeature, e);
-                      }
-                 } else {
-                      console.warn(`Geometría de Construcción #${index} no es Polígono/MultiPolígono válido. Se omitirá.`, construccionFeature);
-                 }
-            });
-             console.log(`Se encontraron ${currentParcelExclusions.length} features de Construcciones que intersectan.`);
-
-
-            // --- Procesar Elementos Internos (aplicar buffer a LineStrings AHORA si intersectan) ---
-             let bufferedLineStringsCount = 0;
-             rawElementosInternosFeatures.forEach((elementoFeature, index) => {
-                 if (elementoFeature.geometry) {
-                      try {
-                          if (turf.booleanIntersects(parcelFeature, elementoFeature)) {
-                               // Si interseca, procesar según el tipo de geometría
-                               if (elementoFeature.geometry.type === 'LineString') {
-                                   try {
-                                       const buffered = turf.buffer(elementoFeature, bufferDistanceForLines, {units: units});
-                                        if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
-                                             const bufferedFeature = JSON.parse(JSON.stringify(buffered)); // Clonar
-                                             currentParcelExclusions.push(bufferedFeature); // Añadir la feature con la geometría del buffer
-                                             bufferedLineStringsCount++;
-                                             // console.log(`LineString de Elemento Interno #${index} interseca, bufferizado y añadido como exclusión.`); // Log detallado
-                                        } else {
-                                             console.warn("El buffer de LineString de Elementos Internos intersectante no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión. Se omitirá.", buffered);
-                                        }
-                                   } catch (e) {
-                                        console.error("Error al crear buffer para LineString de Elemento Interno intersectante:", elementoFeature, e);
-                                        console.warn("Error al crear buffer para LineString intersectante. Se omitirá.", elementoFeature);
-                                   }
-                               } else if (elementoFeature.geometry.type === 'Polygon' || elementoFeature.geometry.type === 'MultiPolygon') {
-                                   // Si es un Polígono/MultiPolígono original, añadirlo directamente si interseca
-                                   currentParcelExclusions.push(elementoFeature);
-                                   // console.log(`Polygon/MultiPolygon de Elemento Interno #${index} interseca y añadido como exclusión.`); // Log detallado
-                               } else {
-                                    console.warn(`Geometría de Elemento Interno #${index} (${elementoFeature.geometry.type}) interseca pero no es LineString, Polígono o MultiPolígono. Se omitirá.`, elementoFeature);
+                 // Procesar features de Construcciones (Polígonos/MultiPolígonos)
+                 if (construccionesFeatures.length > 0) {
+                      let countConstruccionesIntersecting = 0;
+                      for (const feature of construccionesFeatures) {
+                          if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+                               // Usar bboxIntersects para una comprobación rápida inicial
+                               if (turf.bboxIntersects(parcelFeature, feature)) {
+                                   // Aunque bboxIntersects es rápido, una verificación de intersección geométrica es más precisa
+                                    try {
+                                         if (turf.booleanIntersects(parcelFeature, feature)) {
+                                              intersectingExclusionFeatures.push(feature); // Añadir la feature si intersecta
+                                              countConstruccionesIntersecting++;
+                                              // console.log("Feature de Construcción intersecta. Añadida como exclusión."); // Log detallado
+                                         }
+                                    } catch (e) {
+                                         console.warn("Error en booleanIntersects para feature de construcción. Se omitirá.", feature, e);
+                                    }
                                }
-                          } else {
-                               // console.log(`Elemento Interno #${index} no interseca. Se omite.`); // Log detallado
                           }
-                      } catch (e) {
-                           console.warn(`Error general al procesar Elemento Interno #${index} para intersección/buffer. Se omitirá.`, elementoFeature, e);
                       }
+                     console.log(`Features de Construcciones que intersectan (después de booleanIntersects): ${countConstruccionesIntersecting}`);
                  } else {
-                      console.warn(`Elemento Interno #${index} no tiene geometría. Se omitirá.`, elementoFeature);
+                     console.log("No hay features de Construcciones cargadas.");
                  }
-             });
-            console.log(`Se encontraron y procesaron ${currentParcelExclusions.length - rawConstruccionesFeatures.filter(f => f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') && turf.booleanIntersects(parcelFeature, f)).length} features de Elementos Internos que intersectan (incluyendo ${bufferedLineStringsCount} LineStrings bufferizados).`);
-            console.log(`Total de features de exclusión relevantes para esta parcela (intersectantes y bufferizados): ${currentParcelExclusions.length}`);
+
+                 // Procesar features de Elementos Internos (LineStrings y Polígonos/MultiPolígonos)
+                 if (elementosInternosFeatures.length > 0) {
+                      let countElementosInternosIntersecting = 0;
+                      let countElementosInternosBuffered = 0;
+                       for (const feature of elementosInternosFeatures) {
+                           if (feature.geometry) {
+                                // Usar bboxIntersects para una comprobación rápida inicial
+                                if (turf.bboxIntersects(parcelFeature, feature)) {
+                                    // Verificar intersección geométrica precisa
+                                    try {
+                                         if (turf.booleanIntersects(parcelFeature, feature)) {
+                                               countElementosInternosIntersecting++;
+                                              if (feature.geometry.type === 'LineString') {
+                                                  // Si es LineString e intersecta, bufferizar y añadir el resultado
+                                                   try {
+                                                        const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
+                                                         if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
+                                                               // Clonar la feature bufferizada para evitar referencias.
+                                                             const bufferedFeature = JSON.parse(JSON.stringify(buffered));
+                                                             intersectingExclusionFeatures.push(bufferedFeature); // Añadir la feature con la geometría del buffer
+                                                             countElementosInternosBuffered++;
+                                                             // console.log("LineString de Elementos Internos bufferizado e intersecta. Añadido como exclusión."); // Log detallado
+                                                         } else {
+                                                             console.warn("Buffer de LineString de Elementos Internos no resultó en Polígono/MultiPolígono válido. Se omitirá.", buffered);
+                                                         }
+                                                   } catch (e) {
+                                                        console.error("Error al bufferizar LineString de Elementos Internos que intersecta.", feature, e);
+                                                        console.warn("Fallo al bufferizar LineString de Elementos Internos que intersecta. Se omitirá.");
+                                                   }
+
+                                              } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                                                  // Si es Polígono/MultiPolígono e intersecta, añadirlo directamente
+                                                   intersectingExclusionFeatures.push(feature); // Añadir la feature si intersecta
+                                                   // console.log("Polygon/MultiPolígono de Elementos Internos intersecta. Añadido como exclusión."); // Log detallado
+                                              } else {
+                                                   console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) intersecta, pero no es LineString, Polígono o MultiPolígono. Se omitirá.`, feature.geometry);
+                                              }
+                                         }
+                                    } catch (e) {
+                                         console.warn("Error en booleanIntersects para feature de Elementos Internos. Se omitirá.", feature, e);
+                                    }
+                                }
+                           }
+                       }
+                       console.log(`Total features de Elementos Internos que intersectan: ${countElementosInternosIntersecting}. Features bufferizadas y añadidas: ${countElementosInternosBuffered}`);
+
+                 } else {
+                      console.log("No hay features de Elementos Internos cargadas.");
+                 }
 
 
-            // --- Simplificar ligeramente las features de exclusión que intersectan ---
-             let simplifiedExclusionFeatures = [];
-             if (currentParcelExclusions.length > 0) {
-                 const tinySimplificationTolerance = 0.000001;
-                 console.log(`Aplicando mínima simplificación (${tinySimplificationTolerance} grados) a ${currentParcelExclusions.length} features de exclusión relevantes.`);
-                 simplifiedExclusionFeatures = currentParcelExclusions.map(feature => {
+                 console.log(`Total features de exclusión que intersectan con la parcela seleccionada (después de filtrado y buffering): ${intersectingExclusionFeatures.length}`);
+
+
+                // --- Simplificar ligeramente las features de exclusión que intersectan ---
+                 let simplifiedExclusionFeatures = [];
+                 if (intersectingExclusionFeatures.length > 0) {
+                     const tinySimplificationTolerance = 0.000001;
+                     console.log(`Aplicando mínima simplificación (${tinySimplificationTolerance} grados) a ${intersectingExclusionFeatures.length} features de exclusión que intersectan.`);
+                     simplifiedExclusionFeatures = intersectingExclusionFeatures.map(feature => {
+                           try {
+                                if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+                                      const simplified = turf.simplify(feature, { tolerance: tinySimplificationTolerance, highQuality: true });
+
+                                      if (simplified && simplified.geometry && (simplified.geometry.type === 'Polygon' || simplified.geometry.type === 'MultiPolygon' || simplified.geometry.type === 'GeometryCollection')) {
+                                           if (simplified.geometry.type === 'GeometryCollection') {
+                                                let validGeomsInGC = [];
+                                                turf.geomEach(simplified.geometry, function(geom) {
+                                                    if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+                                                        validGeomsInGC.push(turf.feature(geom));
+                                                    }
+                                                });
+                                                if (validGeomsInGC.length > 0) {
+                                                     let consolidatedFeature = null;
+                                                      if (validGeomsInGC.length === 1) {
+                                                           consolidatedFeature = validGeomsInGC[0];
+                                                           // console.log("Simplificación mínima: GC consolidado es 1 polígono. Usando directamente."); // Log detallado
+                                                      } else {
+                                                           try {
+                                                                consolidatedFeature = turf.union(...validGeomsInGC);
+                                                               // console.log("Simplificación mínima: GC consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedFeature ? consolidatedFeature.geometry.type : 'null/undefined'); // Log detallado
+                                                           } catch(e) {
+                                                               console.error("Error al unir partes válidas de GC:", e);
+                                                               console.warn("Simplificación mínima: Falló unión de partes válidas en GC. Devolviendo null.");
+                                                               consolidatedFeature = null;
+                                                           }
+                                                      }
+
+                                                    if(consolidatedFeature && consolidatedFeature.geometry && (consolidatedFeature.geometry.type === 'Polygon' || consolidatedFeature.geometry.type === 'MultiPolygon')) {
+                                                         if (turf.area(consolidatedFeature) > 0) {
+                                                            return consolidatedFeature;
+                                                        } else {
+                                                             console.warn("Simplificación mínima: GC consolidado tiene área 0.", consolidatedFeature);
+                                                            return null;
+                                                        }
+                                                    } else {
+                                                        console.warn("Simplificación mínima: La unión de partes válidas en GC no resultó en Polygon/MultiPolygon.", consolidatedFeature);
+                                                        return null;
+                                                    }
+                                                } else {
+                                                    console.warn("Simplificación mínima: GeometryCollection resultante no contiene polígonos válidos.", simplified);
+                                                    return null;
+                                                }
+                                           } else {
+                                               if (turf.area(simplified) > 0) {
+                                                   return simplified;
+                                                } else {
+                                                    console.warn("Simplificación mínima: Resultado directo (Polygon/MultiPolygon) tiene área 0.", simplified);
+                                                    return null;
+                                                }
+                                           }
+                                      } else {
+                                            console.warn("Simplificación mínima: turf.simplify devolvió un resultado no válido o nulo.", simplified);
+                                            return null;
+                                      }
+                                  } else {
+                                       console.warn("Simplificación mínima: La feature de exclusión no es Polygon/MultiPolígono. Devolviendo null.");
+                                       return null;
+                                  }
+
+                             } catch (e) {
+                                  console.error("Error durante la simplificación mínima de una feature de exclusión:", feature, e);
+                                  console.warn("Simplificación mínima fallida para feature de exclusión. Se omitirá.");
+                                  return null;
+                             }
+                         }).filter(feature => feature !== null);
+
+                         console.log(`Quedan ${simplifiedExclusionFeatures.length} features de exclusión VÁLIDAS que intersectan después de la mínima simplificación.`);
+
+                 } else {
+                      console.log("No hay features de exclusión que intersecten para simplificar.");
+                 }
+
+
+                // --- Calcular el área limpia (Parcela - Unión/Feature única de ExclusionFeatures simplificadas que intersectan) ---
+                let geometryForCalculations = parcelGeometry;
+                let unionOfExclusions = null;
+                let unionGeometryForDifference = null;
+
+
+                if (simplifiedExclusionFeatures.length === 0) {
+                     console.log("No hay features de exclusión simplificadas válidas que intersectan. No se excluirán zonas a evitar.");
+                 } else if (simplifiedExclusionFeatures.length === 1) {
+                     console.log("Solo 1 feature de exclusión simplificada e intersecta. Usando esta directamente para la diferencia.");
+                     unionOfExclusions = simplifiedExclusionFeatures[0];
+                     if (unionOfExclusions && unionOfExclusions.geometry && (unionOfExclusions.geometry.type === 'Polygon' || unionOfExclusions.geometry.type === 'MultiPolygon')) {
+                          unionGeometryForDifference = unionOfExclusions.geometry;
+                          console.log("Feature única de exclusión es Polígono/MultiPolígono válido para la diferencia.");
+                     } else {
+                           console.warn("La única feature de exclusión simplificada que intersecta no es Polígono/MultiPolígono válido. No se excluirán zonas a evitar.");
+                           geometryForCalculations = parcelGeometry;
+                            alert("Advertencia: El área a evitar (que intersecta) no es una geometría válida. Generando pasadas sobre la parcela completa.");
+                     }
+
+                 } else { // simplifiedExclusionFeatures.length > 1
+                      console.log(`Más de 1 feature de exclusión simplificada que intersecta (${simplifiedExclusionFeatures.length}). Calculando unión...`);
+                     try {
+                         // console.log("Input (STRINGIFIED) para turf.union:", JSON.stringify(simplifiedExclusionFeatures)); // Demasiado Verbose
+                         unionOfExclusions = turf.union(...simplifiedExclusionFeatures);
+                         // console.log("Resultado (STRINGIFIED) de turf.union:", JSON.stringify(unionOfExclusions)); // Demasiado Verbose
+
+                         if (unionOfExclusions && unionOfExclusions.geometry) {
+                             if (unionOfExclusions.geometry.type === 'Polygon' || unionOfExclusions.geometry.type === 'MultiPolygon' || unionOfExclusions.geometry.type === 'GeometryCollection') {
+
+                                 let unionGeometryForDifference = null;
+
+                                  if (unionOfExclusions.geometry.type === 'GeometryCollection') {
+                                      console.warn("La unión de áreas a evitar (que intersectan) resultó en un GeometryCollection. Intentando extraer polígonos válidos para la diferencia.");
+                                       let validGeometries = [];
+                                       turf.geomEach(unionOfExclusions.geometry, function(geom) {
+                                           if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+                                               validGeometries.push(turf.feature(geom));
+                                           }
+                                       });
+
+                                       if (validGeometries.length > 0) {
+                                            let consolidatedUnion = null;
+                                             if (validGeometries.length === 1) {
+                                                 consolidatedUnion = validGeometries[0];
+                                                 console.log("GeometryCollection consolidado es 1 polígono. Usando directamente.");
+                                             } else {
+                                                 try {
+                                                      consolidatedUnion = turf.union(...validGeometries);
+                                                     console.log("GeometryCollection consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedUnion ? consolidatedUnion.geometry.type : 'null/undefined');
+                                                 } catch(e) {
+                                                      console.error("Error al intentar unir polígonos válidos dentro de GeometryCollection:", e);
+                                                       console.warn("Error procesando GeometryCollection de unión. Devolviendo null.");
+                                                       consolidatedUnion = null;
+                                                  }
+                                             }
+
+                                             if (consolidatedUnion && consolidatedUnion.geometry && (consolidatedUnion.geometry.type === 'Polygon' || consolidatedUnion.geometry.type === 'MultiPolygon')) {
+                                                 unionGeometryForDifference = consolidatedUnion.geometry;
+                                                  console.log("Polígonos válidos de GeometryCollection unidos con éxito para la diferencia. Tipo resultado unión:", unionGeometryForDifference.type);
+                                             } else {
+                                                 console.warn("La re-unión de polígonos válidos dentro del GeometryCollection no resultó en un polígono válido. Usando solo el polígono más grande.", consolidatedUnion);
+                                                 unionGeometryForDifference = null;
+                                             }
+                                        } else {
+                                             console.warn("GeometryCollection de unión no contiene polígonos válidos para usar en la diferencia. No se excluirán zonas a evitar.", unionOfExclusions);
+                                             unionGeometryForDifference = null;
+                                        }
+
+                                  } else {
+                                       unionGeometryForDifference = unionOfExclusions.geometry;
+                                        console.log("Unión de exclusiones es un Polígono/MultiPolígono válido. Usando este para la diferencia.");
+                                  }
+
+                                 if (!unionGeometryForDifference) {
+                                     console.warn("No se pudo obtener una geometría de unión válida para la diferencia después de procesar el resultado de turf.union. Usando geometría original de la parcela.");
+                                     geometryForCalculations = parcelGeometry;
+                                      alert("Advertencia: El área a evitar (que intersecta) no es una geometría válida. Generando pasadas sobre la parcela completa.");
+                                      // No retornar, seguir con la lógica de fallback en geometryForCalculations
+                                 }
+
+
+                             } else {
+                                  console.warn(`El resultado de turf.union (de features que intersectan) tiene geometría (${unionOfExclusions.geometry.type}), pero no es un tipo válido (Polygon, MultiPolygon, GeometryCollection) para la diferencia. No se excluirán zonas a evitar.`, unionOfExclusions);
+                                  geometryForCalculations = parcelGeometry;
+                                   alert("Advertencia: La unión de áreas a evitar (que intersectan) resultó en una geometría de tipo inesperado. Generando pasadas sobre la parcela completa.");
+                                   // No retornar, seguir con la lógica de fallback en geometryForCalculations
+                             }
+
+                        } else {
+                             console.warn("El resultado de turf.union (de features que intersectan) fue nulo o no tiene geometría. No se excluirán zonas a evitar.", unionOfExclusions);
+                             geometryForCalculations = parcelGeometry;
+                             alert("Advertencia: La unión de áreas a evitar (que intersectan) devolvió un resultado vacío. Generando pasadas sobre la parcela completa.");
+                              // No retornar, seguir con la lógica de fallback en geometryForCalculations
+                        }
+
+                     } catch (e) {
+                         console.error("Error general en turf.union o procesamiento subsiguiente de features que intersectan:", e);
+                         console.warn("Ocurrió un error al calcular la unión de áreas a evitar (que intersectan). Usando geometría original de la parcela.");
+                         geometryForCalculations = parcelGeometry;
+                         alert("Advertencia: Ocurrió un error al calcular la unión de áreas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
+                          // No retornar, seguir con la lógica de fallback en geometryForCalculations
+                     }
+                 }
+
+                 // Si se obtuvo una geometría de unión válida de las exclusiones que intersectan, calcular la diferencia
+                 if (unionGeometryForDifference) {
+                       console.log(`Calculando área limpia: Diferencia entre parcela seleccionada y área de unión de exclusiones que intersectan.`);
                        try {
-                            if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
-                                  const simplified = turf.simplify(feature, { tolerance: tinySimplificationTolerance, highQuality: true });
+                           const unionFeatureForDifference = turf.feature(unionGeometryForDifference);
+                           const parcelFeature = turf.feature(parcelGeometry);
+                            const cleanedArea = turf.difference(parcelFeature, unionFeatureForDifference);
 
-                                  if (simplified && simplified.geometry && (simplified.geometry.type === 'Polygon' || simplified.geometry.type === 'MultiPolygon' || simplified.geometry.type === 'GeometryCollection')) {
-                                       if (simplified.geometry.type === 'GeometryCollection') {
+                            console.log("Resultado de turf.difference (Área limpia):", JSON.stringify(cleanedArea));
+
+                            if (cleanedArea && cleanedArea.geometry) {
+                                 const areaCalculated = turf.area(cleanedArea);
+                                 console.log("Tipo de geometría del área limpia:", cleanedArea.geometry.type, "Área:", areaCalculated, units);
+
+                                 if ((cleanedArea.geometry.type === 'Polygon' || cleanedArea.geometry.type === 'MultiPolygon' || cleanedArea.geometry.type === 'GeometryCollection') && areaCalculated > 0) {
+                                      if (cleanedArea.geometry.type === 'GeometryCollection') {
+                                           console.warn("Área limpia resultante es GeometryCollection. Intentando consolidar para el barrido.");
                                             let validGeomsInGC = [];
-                                            turf.geomEach(simplified.geometry, function(geom) {
+                                            turf.geomEach(cleanedArea.geometry, function(geom) {
                                                 if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
                                                     validGeomsInGC.push(turf.feature(geom));
                                                 }
                                             });
+
                                             if (validGeomsInGC.length > 0) {
-                                                 let consolidatedFeature = null;
+                                                 let consolidatedCleanArea = null;
                                                   if (validGeomsInGC.length === 1) {
-                                                       consolidatedFeature = validGeomsInGC[0];
-                                                       // console.log("Simplificación mínima: GC consolidado es 1 polígono. Usando directamente.");
+                                                       consolidatedCleanArea = validGeomsInGC[0];
+                                                       console.log("GeometryCollection de área limpia consolidado es 1 polígono. Usando directamente.");
                                                   } else {
                                                        try {
-                                                            consolidatedFeature = turf.union(...validGeomsInGC);
-                                                           // console.log("Simplificación mínima: GC consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedFeature ? consolidatedFeature.geometry.type : 'null/undefined');
+                                                            consolidatedCleanArea = turf.union(...validGeomsInCleanedArea);
+                                                           console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanArea.geometry.type : 'null/undefined');
                                                        } catch(e) {
-                                                           console.error("Error al unir partes válidas de GC:", e);
-                                                           console.warn("Simplificación mínima: Falló unión de partes válidas en GC. Devolviendo null.");
-                                                           consolidatedFeature = null;
+                                                            console.error("Error al consolidar GeometryCollection resultante de difference:", e);
+                                                             console.warn("Error procesando el área limpia compleja. Devolviendo null.");
+                                                             consolidatedCleanArea = null;
                                                        }
                                                   }
 
-                                                if(consolidatedFeature && consolidatedFeature.geometry && (consolidatedFeature.geometry.type === 'Polygon' || consolidatedFeature.geometry.type === 'MultiPolygon')) {
-                                                     if (turf.area(consolidatedFeature) > 0) {
-                                                        return consolidatedFeature;
-                                                    } else {
-                                                         console.warn("Simplificación mínima: GC consolidado tiene área 0.", consolidatedFeature);
-                                                        return null;
-                                                    }
-                                                } else {
-                                                    console.warn("Simplificación mínima: La unión de partes válidas en GC no resultó en Polygon/MultiPolygon.", consolidatedFeature);
-                                                    return null;
-                                                }
-                                            } else {
-                                                console.warn("Simplificación mínima: GeometryCollection resultante no contiene polígonos válidos.", simplified);
-                                                return null;
-                                            }
+                                                  if (consolidatedCleanArea && consolidatedCleanArea.geometry && (consolidatedCleanArea.geometry.type === 'Polygon' || consolidatedCleanArea.geometry.type === 'MultiPolygon')) {
+                                                      geometryForCalculations = consolidatedCleanArea.geometry;
+                                                       console.log("Área limpia (parcela - exclusiones) consolidada a:", geometryForCalculations.type, ". Usando para cálculos.");
+                                                  } else {
+                                                      console.warn("La consolidación del GeometryCollection resultante del difference no produjo Polygon/MultiPolygon válido. No se excluirán zonas a evitar.", consolidatedCleanArea);
+                                                      geometryForCalculations = parcelGeometry;
+                                                      alert("Advertencia: No se pudo procesar el área limpia compleja. Generando pasadas sobre la parcela completa.");
+                                                  }
+
+                                             } else {
+                                                  console.warn("El GeometryCollection resultante de difference no contiene polígonos válidos para el barrido. No se excluirán zonas a evitar.", cleanedArea);
+                                                 geometryForCalculations = parcelGeometry;
+                                                  alert("Advertencia: El área limpia resultante no contiene polígonos válidos. Generando pasadas sobre la parcela completa.");
+                                             }
+
+                                      } else {
+                                         geometryForCalculations = cleanedArea.geometry;
+                                         console.log(`Área limpia (parcela - exclusiones) calculada con éxito. Tipo: ${geometryForCalculations.type}, Área > 0. Usando para cálculos.`);
+                                      }
+
+                                 } else {
+                                      console.warn("El área resultante de turf.difference no es un polígono/multipolígono/GC válido o tiene área 0. No se excluirán zonas a evitar.", cleanedArea);
+                                      geometryForCalculations = parcelGeometry;
+                                       if (areaCalculated === 0) {
+                                            console.log("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar (área limpia = 0).");
+                                            alert("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar. No se pueden generar pasadas útiles.");
+                                            console.log("Revertiendo a geometría original de la parcela según la lógica actual.");
+                                            geometryForCalculations = parcelGeometry;
                                        } else {
-                                           if (turf.area(simplified) > 0) {
-                                               return simplified;
-                                            } else {
-                                                console.warn("Simplificación mínima: Resultado directo (Polygon/MultiPolygon) tiene área 0.", simplified);
-                                                return null;
-                                            }
+                                             console.warn("Advertencia: El área limpia resultante no es una geometría válida para generar pasadas.");
+                                             geometryForCalculations = parcelGeometry;
+                                              alert("Advertencia: El área limpia resultante no es una geometría válida para generar pasadas. Generando pasadas sobre la parcela completa.");
                                        }
-                                  } else {
-                                        console.warn("Simplificación mínima: turf.simplify devolvió un resultado no válido o nulo.", simplified);
-                                        return null;
-                                  }
-                              } else {
-                                   console.warn("Simplificación mínima: La feature de exclusión no es Polygon/MultiPolígono. Devolviendo null.");
-                                   return null;
-                              }
+                                 }
 
-                         } catch (e) {
-                              console.error("Error durante la simplificación mínima de una feature de exclusión:", feature, e);
-                              console.warn("Simplificación mínima fallida para feature de exclusión. Se omitirá.");
-                              return null;
-                         }
-                     }).filter(feature => feature !== null);
-
-                     console.log(`Quedan ${simplifiedExclusionFeatures.length} features de exclusión VÁLIDAS después de la mínima simplificación.`);
-
-             } else {
-                  console.log("No hay features de exclusión relevantes para esta parcela.");
-             }
-
-
-            // --- Calcular el área limpia (Parcela - Unión/Feature única de ExclusionFeatures simplificadas) ---
-            let geometryForCalculations = parcelGeometry;
-            let unionOfExclusions = null;
-            let unionGeometryForDifference = null;
-
-
-            if (simplifiedExclusionFeatures.length === 0) {
-                 console.log("No hay features de exclusión simplificadas válidas. No se excluirán zonas a evitar.");
-             } else if (simplifiedExclusionFeatures.length === 1) {
-                 console.log("Solo 1 feature de exclusión simplificada. Usando esta directamente para la diferencia.");
-                 unionOfExclusions = simplifiedExclusionFeatures[0];
-                 if (unionOfExclusions && unionOfExclusions.geometry && (unionOfExclusions.geometry.type === 'Polygon' || unionOfExclusions.geometry.type === 'MultiPolygon')) {
-                      unionGeometryForDifference = unionOfExclusions.geometry;
-                      console.log("Feature única de exclusión es Polígono/MultiPolígono válido para la diferencia.");
+                            } else {
+                                 console.warn("El resultado de turf.difference no tiene una geometría válida. No se excluirán zonas a evitar.", cleanedArea);
+                                geometryForCalculations = parcelGeometry;
+                                 alert("Advertencia: El resultado del cálculo de áreas a evitar no es válido. Generando pasadas sobre la parcela completa.");
+                            }
+                       } catch (e) {
+                            console.error("Error durante el cálculo de diferencia de geometrías:", e);
+                            console.warn("Ocurrió un error al excluir zonas a evitar. Usando geometría original de la parcela.");
+                            geometryForCalculations = parcelGeometry;
+                            alert("Advertencia: Ocurrió un error al excluir zonas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
+                       }
                  } else {
-                       console.warn("La única feature de exclusión simplificada no es Polígono/MultiPolígono válido. No se excluirán zonas a evitar.");
-                       geometryForCalculations = parcelGeometry;
-                        alert("Advertencia: El área a evitar no es una geometría válida. Generando pasadas sobre la parcela completa.");
+                     console.log("No se pudo calcular un área limpia válida (probablemente no hay exclusiones que intersecten válidas o hubo un error en el procesamiento de la unión). Usando geometría original de la parcela.");
                  }
 
-             } else { // simplifiedExclusionFeatures.length > 1
-                  console.log(`Más de 1 feature de exclusión simplificada (${simplifiedExclusionFeatures.length}). Calculando unión...`);
-                 try {
-                     // console.log("Input (STRINGIFIED) para turf.union:", JSON.stringify(simplifiedExclusionFeatures)); // Descomentar para debug
-                     unionOfExclusions = turf.union(...simplifiedExclusionFeatures);
-                     // console.log("Resultado (STRINGIFIED) de turf.union:", JSON.stringify(unionOfExclusions)); // Descomentar para debug
 
-                     if (unionOfExclusions && unionOfExclusions.geometry) {
-                         if (unionOfExclusions.geometry.type === 'Polygon' || unionOfExclusions.geometry.type === 'MultiPolygon' || unionOfExclusions.geometry.type === 'GeometryCollection') {
+                // --- SIMPLIFICACIÓN (Aplicar a la geometría que resulte de la exclusión o a la original si falló la exclusión) ---
+                let finalGeometryToSweep = geometryForCalculations;
+                console.log("Intentando simplificar la geometría final para el barrido...");
+                // console.log("Geometría ANTES de simplificar:", JSON.stringify(geometryForCalculations)); // Demasiado Verbose
 
-                             let unionGeometryForDifference = null;
+                if (!geometryForCalculations || !geometryForCalculations.type) {
+                     console.error("La geometría para simplificar es nula, undefined o de tipo incorrecto. Deteniendo proceso.");
+                      alert("Error: La geometría resultante para generar pasadas no es válida.");
+                     return;
+                }
 
-                              if (unionOfExclusions.geometry.type === 'GeometryCollection') {
-                                  console.warn("La unión de áreas a evitar resultó en un GeometryCollection. Intentando extraer polígonos válidos para la diferencia.");
-                                   let validGeometries = [];
-                                   turf.geomEach(unionOfExclusions.geometry, function(geom) {
-                                       if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
-                                           validGeometries.push(turf.feature(geom));
-                                       }
-                                   });
+                try {
+                    const simplificationTolerance = 0.00005;
 
-                                   if (validGeometries.length > 0) {
-                                        let consolidatedUnion = null;
-                                         if (validGeometries.length === 1) {
-                                             consolidatedUnion = validGeometries[0];
-                                             console.log("GeometryCollection consolidado es 1 polígono. Usando directamente.");
-                                         } else {
-                                             try {
-                                                  consolidatedUnion = turf.union(...validGeometries);
-                                                 console.log("GeometryCollection consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedUnion ? consolidatedUnion.geometry.type : 'null/undefined');
-                                             } catch(e) {
-                                                  console.error("Error al intentar unir polígonos válidos dentro de GeometryCollection:", e);
-                                                   console.warn("Error procesando GeometryCollection de unión. Devolviendo null.");
-                                                   consolidatedUnion = null;
-                                              }
-                                         }
+                    const featureToSimplify = turf.feature(geometryForCalculations);
 
-                                         if (consolidatedUnion && consolidatedUnion.geometry && (consolidatedUnion.geometry.type === 'Polygon' || consolidatedUnion.geometry.type === 'MultiPolygon')) {
-                                             unionGeometryForDifference = consolidatedUnion.geometry;
-                                              console.log("Polígonos válidos de GeometryCollection unidos con éxito para la diferencia. Tipo resultado unión:", unionGeometryForDifference.type);
-                                         } else {
-                                             console.warn("La re-unión de polígonos válidos dentro del GeometryCollection no resultó en un polígono válido. Usando solo el polígono más grande.", consolidatedUnion);
-                                             unionGeometryForDifference = null; // Si falla la unión, intentar usar el polígono más grande
-                                              if (validGeometries.length > 0) {
-                                                  let largestSubPoly = null;
-                                                  let maxArea = 0;
-                                                   validGeometries.forEach(f => {
-                                                       try {
-                                                           const area = turf.area(f);
-                                                            if (area > maxArea) {
-                                                                maxArea = area;
-                                                                largestSubPoly = f.geometry;
-                                                            }
-                                                       } catch(e) {
-                                                          console.warn("Error calculando área de sub-polígono en GC:", e);
-                                                       }
-                                                   });
-                                                   if (largestSubPoly) {
-                                                        unionGeometryForDifference = largestSubPoly;
-                                                         console.log("Usando el polígono más grande del GeometryCollection para la diferencia.");
-                                                   } else {
-                                                        console.warn("No se pudo encontrar el polígono más grande en el GeometryCollection para la diferencia.");
-                                                   }
-                                               }
-                                         }
-                                    } else {
-                                         console.warn("GeometryCollection de unión no contiene polígonos válidos para usar en la diferencia. No se excluirán zonas a evitar.", unionOfExclusions);
-                                         unionGeometryForDifference = null;
-                                    }
+                     if (featureToSimplify) {
+                          const simplifiedFeature = turf.simplify(featureToSimplify, {
+                               tolerance: simplificationTolerance,
+                               highQuality: true
+                          });
 
-                               } else {
-                                    unionGeometryForDifference = unionOfExclusions.geometry;
-                                     console.log("Unión de exclusiones es un Polígono/MultiPolígono válido. Usando este para la diferencia.");
+                           // console.log("Resultado de turf.simplify:", JSON.stringify(simplifiedFeature)); // Demasiado Verbose
+
+                           if (simplifiedFeature && simplifiedFeature.geometry && (simplifiedFeature.geometry.type === 'Polygon' || simplifiedFeature.geometry.type === 'MultiPolygon')) {
+                               finalGeometryToSweep = simplifiedFeature.geometry;
+                               console.log("Geometría final simplificada con éxito. Tipo:", finalGeometryToSweep.type);
+                           } else {
+                                console.warn("El resultado de turf.simplify no es un polígono o multipolígono válido. Usando geometría sin simplificar.", simplifiedFeature);
+                                finalGeometryToSweep = geometryForCalculations;
+                                alert("Advertencia: No se pudo simplificar la geometría resultante del área limpia. Generando pasadas con geometría detallada (puede ser más lento).");
+                           }
+                     } else {
+                         console.warn("No se pudo crear una feature para simplificar. Usando geometría sin simplificar.");
+                         finalGeometryToSweep = geometryForCalculations;
+                          alert("Advertencia: No se pudo crear Feature para simplificar. Generando pasadas con geometría detallada.");
+                     }
+
+
+                } catch (e) {
+                    console.error("Error durante la simplificación de geometría:", e);
+                    console.warn("No se pudo simplificar la geometría final. Usando geometría sin simplificar.");
+                    finalGeometryToSweep = geometryForCalculations;
+                    alert("Advertencia: Ocurrió un error al simplificar la geometría. Generando pasadas con geometría detallada (puede ser más lento). Revisa la consola.");
+                }
+
+
+                // Asegurarse de que la geometría final para el barrido sea un polígono simple o usar el polígono más grande si es MultiPolygon
+                let geometryForSweepAndPiP = null;
+                if (finalGeometryToSweep && (finalGeometryToSweep.type === 'Polygon' || finalGeometryToSweep.type === 'MultiPolygon')) {
+                     geometryForSweepAndPiP = finalGeometryToSweep;
+
+                     if (geometryForSweepAndPiP.type === 'MultiPolygon') {
+                         console.log("La geometría final para el barrido es un MultiPolygon. Intentando usar el polígono más grande o su unión.");
+                         let largestPoly = null;
+                         let maxPolyArea = 0;
+                         let validPolygonsInMulti = [];
+
+                         if (geometryForSweepAndPiP.coordinates && Array.isArray(geometryForSweepAndPiP.coordinates)) {
+                             geometryForSweepAndPiP.coordinates.forEach(polyCoords => {
+                                 try {
+                                     const currentPoly = turf.polygon(polyCoords);
+                                      let area = turf.area(currentPoly);
+                                       validPolygonsInMulti.push(turf.feature(currentPoly.geometry));
+                                     if (area > maxPolyArea) {
+                                         maxPolyArea = area;
+                                         largestPoly = currentPoly.geometry;
+                                     }
+                                 } catch (e) {
+                                    console.warn("Error procesando un polígono dentro del MultiPolygon final:", e);
+                                 }
+                             });
+                         } else {
+                              console.error("Las coordenadas del MultiPolygon final no son válidas.");
+                         }
+
+
+                         if (largestPoly) {
+                             if (validPolygonsInMulti.length > 0) {
+                                 if (validPolygonsInMulti.length > 1) {
+                                     console.log(`MultiPolygon contiene ${validPolygonsInMulti.length} polígonos válidos. Intentando unirlos para el barrido.`);
+                                     try {
+                                          const unionOfMultiParts = turf.union(...validPolygonsInMulti);
+                                           if (unionOfMultiParts && unionOfMultiParts.geometry && (unionOfMultiParts.geometry.type === 'Polygon' || unionOfMultiParts.geometry.type === 'MultiPolygon')) {
+                                               geometryForSweepAndPiP = unionOfMultiParts.geometry;
+                                                console.log("Polígonos del MultiPolygon unidos con éxito para el barrido. Resultado:", geometryForSweepAndPiP.type);
+                                           } else {
+                                                console.warn("La unión de las partes del MultiPolygon no resultó en un polígono/multipolígono válido. Usando solo el polígono más grande.", unionOfMultiParts);
+                                                geometryForSweepAndPiP = largestPoly;
+                                           }
+                                     } catch (e) {
+                                          console.error("Error al intentar unir las partes del MultiPolygon:", e);
+                                           console.warn("Error al unir las partes del MultiPolygon. Usando solo el polígono más grande.");
+                                           geometryForSweepAndPiP = largestPoly;
+                                     }
+                                 } else {
+                                     geometryForSweepAndPiP = largestPoly;
+                                     console.log("MultiPolygon con 1 polígono válido encontrado. Usando este para el barrido.");
+                                 }
+                             } else {
+                                   console.error("MultiPolygon resultante no contiene polígonos válidos después de procesar las partes.");
+                                   alert("Error procesando la geometría para el barrido. No se encontraron polígonos válidos dentro del MultiPolygon.");
+                                   return;
+                             }
+
+                         } else {
+                              console.error("MultiPolygon resultante no contiene polígonos válidos para el barrido y no se pudo encontrar el polígono más grande.");
+                              alert("Error procesando la geometría para el barrido. No se encontraron polígonos válidos dentro del MultiPolygon.");
+                              return;
+                         }
+                     } else {
+                         console.log("La geometría final para el barrido es un Polígono simple válido.");
+                     }
+                } else {
+                     console.error("La geometría final para el barrido es nula, undefined o de tipo incorrecto:", finalGeometryToSweep);
+                     alert("Error: La geometría resultante (después de excluir zonas a evitar/simplificar) no es un polígono válido para generar pasadas.");
+                     return;
+                }
+
+
+                console.log("Geometría FINAL para barrido y PiP:", JSON.stringify(geometryForSweepAndPiP));
+                try {
+                     if (turf.area(geometryForSweepAndPiP) === 0) {
+                          console.error("La geometría final para el barrido tiene área 0.");
+                           alert("La geometría resultante del área limpia tiene área cero. No se pueden generar pasadas.");
+                          return;
+                     }
+                } catch(e) {
+                     console.error("Error calculando área de geometría final para barrido:", e);
+                      alert("Error verificando la geometría final para el barrido.");
+                     return;
+                }
+
+
+                let centroid = null;
+                try {
+                     // Calcular el centroide del área limpia para usar como pivote de rotación
+                     centroid = turf.centroid(geometryForSweepAndPiP);
+                     console.log("Centroide del área limpia para rotación:", JSON.stringify(centroid));
+                } catch(e) {
+                     console.error("Error calculando centroide de la geometría limpia:", e);
+                      alert("Error calculando el centroide para la rotación.");
+                     return;
+                }
+
+
+                let rotationAngle = 0; // Variable para almacenar el ángulo de rotación final
+                let sweepDirectionInRotatedSpace = 0; // 0 para N-S (pasadas O-E), 1 para E-W (pasadas S-N)
+                let heuristicDirectionDescription = "";
+
+                // --- Lógica para determinar el ángulo de rotación: Usar la lógica de fallback existente (sin MDT) ---
+                 console.log("Usando lógica de fallback para determinar el ángulo de rotación (sin datos de pendiente).");
+                // Usar la lógica de fallback existente
+                  let originalParcelBbox = null;
+                  let originalBboxWidthMeters = 0;
+                  let originalBboxHeightMeters = 0;
+                  let originalParcelArea = 0;
+                  let originalBboxArea = 0;
+                  let originalRectangularity = 0;
+
+                   try {
+                        originalParcelBbox = turf.bbox(parcelGeometry);
+                        originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalBbox[1]]), {units: units});
+                        originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalBbox[3]]), {units: units});
+                        originalParcelArea = turf.area(turf.feature(parcelGeometry));
+                        originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
+                        originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
+
+                        console.log(`Dimensiones Bbox original (fallback): Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
+
+                   } catch(e) {
+                        console.error("Error calculando Bbox o Rectangularidad de la parcela original (fallback):", e);
+                   }
+
+                  let longestSegmentAngle = 0;
+                  let foundLongestSegment = false;
+                   if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
+                      const exteriorCoords = parcelGeometry.coordinates[0];
+                      if (Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
+                           let maxLength = 0;
+                           let p1Longest = null;
+                           let p2Longest = null;
+
+                           for (let i = 0; i < exteriorCoords.length - 1; i++) {
+                               const p1 = turf.point(exteriorCoords[i]);
+                               const p2 = turf.point(exteriorCoords[i+1]);
+                               try {
+                                  const length = turf.distance(p1, p2, {units: units});
+                                  if (length > maxLength) {
+                                      maxLength = length;
+                                      p1Longest = p1;
+                                      p2Longest = p2;
+                                  }
+                               } catch(e) {
+                                  console.warn("Error calculando distancia para segmento en heurística (fallback):", p1, p2, e);
                                }
 
-                             if (!unionGeometryForDifference) {
-                                 console.warn("No se pudo obtener una geometría de unión válida para la diferencia después de procesar el resultado de turf.union. Usando geometría original de la parcela.");
-                                 geometryForCalculations = parcelGeometry;
-                                  alert("Advertencia: El área a evitar no es una geometría válida. Generando pasadas sobre la parcela completa.");
-                                  return; // Salir de la función de click
-                             }
+                           }
 
+                           if (p1Longest && p2Longest) {
+                               try {
+                                   longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
+                                   foundLongestSegment = true;
+                                   console.log(`Lado más largo de la parcela original encontrado (fallback). Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
+                               } catch(e) {
+                                    console.warn("Error calculando bearing para lado más largo (fallback):", p1Longest, p2Longest, e);
+                                    foundLongestSegment = false;
+                               }
+                           } else {
+                                console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo (fallback).");
+                           }
+                      } else {
+                          console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos (fallback).");
+                      }
+                   } else {
+                        console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo (fallback).");
+                   }
 
-                         } else {
-                              console.warn(`El resultado de turf.union tiene geometría (${unionOfExclusions.geometry.type}), pero no es un tipo válido (Polygon, MultiPolygon, GeometryCollection) para la diferencia. No se excluirán zonas a evitar.`, unionOfExclusions);
-                              geometryForCalculations = parcelGeometry;
-                               alert("Advertencia: La unión de áreas a evitar resultó en una geometría de tipo inesperado. Generando pasadas sobre la parcela completa.");
-                              return; // Salir de la función de click
-                         }
+                  const useLongestSideThreshold = 0.7;
 
-                    } else {
-                         console.warn("El resultado de turf.union fue nulo o no tiene geometría. No se excluirán zonas a evitar.", unionOfExclusions);
-                         geometryForCalculations = parcelGeometry;
-                         alert("Advertencia: La unión de áreas a evitar devolvió un resultado vacío. Generando pasadas sobre la parcela completa.");
-                          return; // Salir de la función de click
-                    }
+                  if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
+                      rotationAngle = -longestSegmentAngle;
+                      sweepDirectionInRotatedSpace = 0;
+                      heuristicDirectionDescription = `Lado más largo de la parcela original (fallback: ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
+                       console.log("Heurística (fallback): Usando el lado más largo como dirección principal.");
 
-                 } catch (e) {
-                     console.error("Error general en turf.union o procesamiento subsiguiente:", e);
-                     console.warn("Ocurrió un error al calcular la unión de áreas a evitar. Usando geometría original de la parcela.");
-                     geometryForCalculations = parcelGeometry;
-                     alert("Advertencia: Ocurrió un error al calcular la unión de áreas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
-                     return; // Salir de la función de click
-                 }
-             }
-
-             if (unionGeometryForDifference) {
-                   console.log(`Calculando área limpia: Diferencia entre parcela seleccionada y área de unión de exclusiones.`);
-                   try {
-                       const unionFeatureForDifference = turf.feature(unionGeometryForDifference);
-                       const parcelFeature = turf.feature(parcelGeometry);
-                        const cleanedArea = turf.difference(parcelFeature, unionFeatureForDifference);
-
-                        // console.log("Resultado de turf.difference (Área limpia):", JSON.stringify(cleanedArea)); // Descomentar para debug
-
-                        if (cleanedArea && cleanedArea.geometry) {
-                             const areaCalculated = turf.area(cleanedArea);
-                             console.log("Tipo de geometría del área limpia:", cleanedArea.geometry.type, "Área:", areaCalculated, units);
-
-                             if ((cleanedArea.geometry.type === 'Polygon' || cleanedArea.geometry.type === 'MultiPolygon' || cleanedArea.geometry.type === 'GeometryCollection') && areaCalculated > 0) {
-                                  if (cleanedArea.geometry.type === 'GeometryCollection') {
-                                       console.warn("Área limpia resultante es GeometryCollection. Intentando consolidar para el barrido.");
-                                        let validGeomsInCleanedArea = [];
-                                        turf.geomEach(cleanedArea.geometry, function(geom) {
-                                            if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
-                                                validGeomsInCleanedArea.push(turf.feature(geom));
-                                            }
-                                        });
-
-                                        if (validGeomsInCleanedArea.length > 0) {
-                                             let consolidatedCleanArea = null;
-                                              if (validGeomsInCleanedArea.length === 1) {
-                                                   consolidatedCleanArea = validGeomsInCleanedArea[0];
-                                                   console.log("GeometryCollection de área limpia consolidado es 1 polígono. Usando directamente.");
-                                              } else {
-                                                   try {
-                                                        consolidatedCleanArea = turf.union(...validGeomsInCleanedArea);
-                                                       console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanArea.geometry.type : 'null/undefined');
-                                                   } catch(e) {
-                                                        console.error("Error al consolidar GeometryCollection resultante de difference:", e);
-                                                         console.warn("Error procesando el área limpia compleja. Devolviendo null.");
-                                                         consolidatedCleanArea = null;
-                                                   }
-                                              }
-
-                                              if (consolidatedCleanArea && consolidatedCleanArea.geometry && (consolidatedCleanArea.geometry.type === 'Polygon' || consolidatedCleanArea.geometry.type === 'MultiPolygon')) {
-                                                  geometryForCalculations = consolidatedCleanArea.geometry;
-                                                   console.log("Área limpia (parcela - exclusiones) consolidada a:", geometryForCalculations.type, ". Usando para cálculos.");
-                                              } else {
-                                                  console.warn("La consolidación del GeometryCollection resultante del difference no produjo Polygon/MultiPolygon válido. No se excluirán zonas a evitar.", consolidatedCleanArea);
-                                                  geometryForCalculations = parcelGeometry; // Revertir a parcela original si la consolidación falla
-                                                  alert("Advertencia: No se pudo procesar el área limpia compleja. Generando pasadas sobre la parcela completa.");
-                                              }
-
-                                         } else {
-                                              console.warn("El GeometryCollection resultante de difference no contiene polígonos válidos para el barrido. No se excluirán zonas a evitar.", cleanedArea);
-                                             geometryForCalculations = parcelGeometry; // Revertir a parcela original
-                                              alert("Advertencia: El área limpia resultante no contiene polígonos válidos. Generando pasadas sobre la parcela completa.");
-                                         }
-
-                                  } else {
-                                     geometryForCalculations = cleanedArea.geometry;
-                                     console.log(`Área limpia (parcela - exclusiones) calculada con éxito. Tipo: ${geometryForCalculations.type}, Área > 0. Usando para cálculos.`);
-                                  }
-
-                             } else {
-                                  console.warn("El área resultante de turf.difference no es un polígono/multipolígono/GC válido o tiene área 0. No se excluirán zonas a evitar.", cleanedArea);
-                                  geometryForCalculations = parcelGeometry; // Revertir a parcela original
-                                   if (areaCalculated === 0) {
-                                        console.log("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar (área limpia = 0).");
-                                        alert("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar. No se pueden generar pasadas útiles.");
-                                        console.log("Revirtiendo a geometría original de la parcela según la lógica actual.");
-                                        geometryForCalculations = parcelGeometry;
-                                   } else {
-                                         console.warn("Advertencia: El área limpia resultante no es una geometría válida para generar pasadas.");
-                                         geometryForCalculations = parcelGeometry;
-                                          alert("Advertencia: El área limpia resultante no es una geometría válida para generar pasadas. Generando pasadas sobre la parcela completa.");
-                                   }
-                             }
-
+                  } else {
+                      console.log("Heurística (fallback): Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
+                      if (originalBboxWidthMeters >= originalBboxHeightMeters) {
+                          rotationAngle = 0;
+                          sweepDirectionInRotatedSpace = 0;
+                          heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual) (fallback)";
+                      } else {
+                          rotationAngle = 90;
+                          sweepDirectionInRotatedSpace = 0;
+                          heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales) (fallback)";
+                           console.log("Bbox más alta que ancha (fallback), rotando 90 grados para pasadas horizontales en el espacio rotado.");
+                      }
+                  }
+                  rotationAngle = (rotationAngle % 360 + 360) % 360; // Asegurar ángulo entre 0 y 360
+                  // Aquí, si usamos fallback, necesitamos determinar sweepDirectionInRotatedSpace
+                  // basándonos en el rotationAngle para que las pasadas sean O-E (0) o S-N (1) en el espacio rotado.
+                  // Si rotationAngle está cerca de 0 o 180, sweepDirectionInRotatedSpace = 0.
+                  // Si rotationAngle está cerca de 90 o 270, sweepDirectionInRotatedSpace = 1.
+                   const angleMod90 = rotationAngle % 90;
+                   if (angleMod90 < 45 || angleMod90 > 45) { // Más cerca de 0/90/180/270
+                        if ((rotationAngle >= 315 || rotationAngle < 45) || (rotationAngle >= 135 && rotationAngle < 225)) {
+                             // Cerca de 0 o 180 -> barrido S-N en espacio rotado (pasadas O-E)
+                             sweepDirectionInRotatedSpace = 0;
+                             console.log("Fallback: Ángulo de rotación cerca de 0/180. Barrido S->N en espacio rotado.");
                         } else {
-                             console.warn("El resultado de turf.difference no tiene una geometría válida. No se excluirán zonas a evitar.", cleanedArea);
-                            geometryForCalculations = parcelGeometry; // Revertir a parcela original
-                             alert("Advertencia: El resultado del cálculo de áreas a evitar no es válido. Generando pasadas sobre la parcela completa.");
+                             // Cerca de 90 o 270 -> barrido O-E en espacio rotado (pasadas S-N)
+                              sweepDirectionInRotatedSpace = 1;
+                              console.log("Fallback: Ángulo de rotación cerca de 90/270. Barrido O->E en espacio rotado.");
                         }
-                   } catch (e) {
-                        console.error("Error durante el cálculo de diferencia de geometrías:", e);
-                        console.warn("Ocurrió un error al excluir zonas a evitar. Usando geometría original de la parcela.");
-                        geometryForCalculations = parcelGeometry; // Revertir a parcela original
-                        alert("Advertencia: Ocurrió un error al excluir zonas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
-                   }
-             } else {
-                 console.log("No se pudo calcular un área limpia válida (probablemente no hay exclusiones válidas o hubo un error en el procesamiento de la unión). Usando geometría original de la parcela.");
-             }
 
-
-            // --- SIMPLIFICACIÓN (Aplicar a la geometría que resulte de la exclusión o a la original si falló la exclusión) ---
-            let finalGeometryToSweep = geometryForCalculations;
-            console.log("Intentando simplificar la geometría final para el barrido...");
-            // console.log("Geometría ANTES de simplificar:", JSON.stringify(geometryForCalculations)); // Descomentar para debug
-
-            if (!geometryForCalculations || !geometryForCalculations.type) {
-                 console.error("La geometría para simplificar es nula, undefined o de tipo incorrecto. Deteniendo proceso.");
-                  alert("Error: La geometría resultante para generar pasadas no es válida.");
-                 return;
-            }
-
-            try {
-                const simplificationTolerance = 0.00005;
-
-                const featureToSimplify = turf.feature(geometryForCalculations);
-
-                 if (featureToSimplify) {
-                      const simplifiedFeature = turf.simplify(featureToSimplify, {
-                           tolerance: simplificationTolerance,
-                           highQuality: true
-                      });
-
-                       // console.log("Resultado de turf.simplify:", JSON.stringify(simplifiedFeature)); // Descomentar para debug
-
-                       if (simplifiedFeature && simplifiedFeature.geometry && (simplifiedFeature.geometry.type === 'Polygon' || simplifiedFeature.geometry.type === 'MultiPolygon')) {
-                           finalGeometryToSweep = simplifiedFeature.geometry;
-                           console.log("Geometría final simplificada con éxito. Tipo:", finalGeometryToSweep.type);
-                       } else {
-                            console.warn("El resultado de turf.simplify no es un polígono o multipolígono válido. Usando geometría sin simplificar.", simplifiedFeature);
-                            finalGeometryToSweep = geometryForCalculations;
-                            alert("Advertencia: No se pudo simplificar la geometría resultante del área limpia. Generando pasadas con geometría detallada (puede ser más lento).");
-                       }
-                 } else {
-                     console.warn("No se pudo crear una feature para simplificar. Usando geometría sin simplificar.");
-                     finalGeometryToSweep = geometryForCalculations;
-                      alert("Advertencia: No se pudo crear Feature para simplificar. Generando pasadas con geometría detallada.");
-                 }
-
-
-            } catch (e) {
-                console.error("Error durante la simplificación de geometría:", e);
-                console.warn("No se pudo simplificar la geometría final. Usando geometría sin simplificar.");
-                finalGeometryToSweep = geometryForCalculations;
-                alert("Advertencia: Ocurrió un error al simplificar la geometría. Generando pasadas con geometría detallada (puede ser más lento). Revisa la consola.");
-            }
-
-
-            // Asegurarse de que la geometría final para el barrido sea un polígono simple o usar el polígono más grande si es MultiPolygon
-            let geometryForSweepAndPiP = null;
-            if (finalGeometryToSweep && (finalGeometryToSweep.type === 'Polygon' || finalGeometryToSweep.type === 'MultiPolygon')) {
-                 geometryForSweepAndPiP = finalGeometryToSweep;
-
-                 if (geometryForSweepAndPiP.type === 'MultiPolygon') {
-                     console.log("La geometría final para el barrido es un MultiPolygon. Intentando usar el polígono más grande o su unión.");
-                     let largestPoly = null;
-                     let maxPolyArea = 0;
-                     let validPolygonsInMulti = [];
-
-                     if (geometryForSweepAndPiP.coordinates && Array.isArray(geometryForSweepAndPiP.coordinates)) {
-                         geometryForSweepAndPiP.coordinates.forEach(polyCoords => {
-                             try {
-                                 const currentPoly = turf.polygon(polyCoords);
-                                  let area = turf.area(currentPoly);
-                                   validPolygonsInMulti.push(turf.feature(currentPoly.geometry));
-                                 if (area > maxPolyArea) {
-                                     maxArea = area; // Corregido: usar maxArea consistentemente
-                                     largestPoly = currentPoly.geometry;
-                                 }
-                             } catch (e) {
-                                console.warn("Error procesando un polígono dentro del MultiPolygon final:", e);
-                             }
-                         });
-                     } else {
-                          console.error("Las coordenadas del MultiPolygon final no son válidas.");
-                     }
-
-
-                     if (largestPoly) {
-                         if (validPolygonsInMulti.length > 0) {
-                             if (validPolygonsInMulti.length > 1) {
-                                 console.log(`MultiPolygon contiene ${validPolygonsInMulti.length} polígonos válidos. Intentando unirlos para el barrido.`);
-                                 try {
-                                      const unionOfMultiParts = turf.union(...validPolygonsInMulti);
-                                       if (unionOfMultiParts && unionOfMultiParts.geometry && (unionOfMultiParts.geometry.type === 'Polygon' || unionOfMultiParts.geometry.type === 'MultiPolygon')) {
-                                           geometryForSweepAndPiP = unionOfMultiParts.geometry;
-                                            console.log("Polígonos del MultiPolygon unidos con éxito para el barrido. Resultado:", geometryForSweepAndPiP.type);
-                                       } else {
-                                            console.warn("La unión de las partes del MultiPolygon no resultó en un polígono/multipolígono válido. Usando solo el polígono más grande.", unionOfMultiParts);
-                                            geometryForSweepAndPiP = largestPoly; // Usar el polígono más grande como fallback
-                                       }
-                                 } catch (e) {
-                                      console.error("Error al intentar unir las partes del MultiPolygon:", e);
-                                       console.warn("Error al unir las partes del MultiPolygon. Usando solo el polígono más grande.");
-                                       geometryForSweepAndPiP = largestPoly; // Usar el polígono más grande como fallback
-                                 }
-                             } else {
-                                 geometryForSweepAndPiP = largestPoly;
-                                 console.log("MultiPolygon con 1 polígono válido encontrado. Usando este para el barrido.");
-                             }
-                         } else {
-                               console.error("MultiPolygon resultante no contiene polígonos válidos después de procesar las partes.");
-                               alert("Error procesando la geometría para el barrido. No se encontraron polígonos válidos dentro del MultiPolygon.");
-                               return; // Salir de la función de click
-                         }
-
-                     } else {
-                          console.error("MultiPolygon resultante no contiene polígonos válidos para el barrido y no se pudo encontrar el polígono más grande.");
-                          alert("Error procesando la geometría para el barrido. No se encontraron polígonos válidos dentro del MultiPolygon.");
-                          return; // Salir de la función de click
-                     }
-                 } else {
-                     console.log("La geometría final para el barrido es un Polígono simple válido.");
-                 }
-            } else {
-                 console.error("La geometría final para el barrido es nula, undefined o de tipo incorrecto:", finalGeometryToSweep);
-                 alert("Error: La geometría resultante (después de excluir zonas a evitar/simplificar) no es un polígono válido para generar pasadas.");
-                 return; // Salir de la función de click
-            }
-
-
-            // console.log("Geometría FINAL para barrido y PiP:", JSON.stringify(geometryForSweepAndPiP)); // Descomentar para debug
-            try {
-                 if (turf.area(geometryForSweepAndPiP) === 0) {
-                      console.error("La geometría final para el barrido tiene área 0.");
-                       alert("La geometría resultante del área limpia tiene área cero. No se pueden generar pasadas.");
-                      return; // Salir de la función de click
-                 }
-            } catch(e) {
-                 console.error("Error calculando área de geometría final para barrido:", e);
-                  alert("Error verificando la geometría final para el barrido.");
-                 return; // Salir de la función de click
-            }
-
-
-            let centroid = null;
-            try {
-                 centroid = turf.centroid(geometryForSweepAndPiP);
-                 console.log("Centroide del área limpia para rotación:", JSON.stringify(centroid));
-            } catch(e) {
-                 console.error("Error calculando centroide de la geometría limpia:", e);
-                  alert("Error calculando el centroide para la rotación.");
-                 return; // Salir de la función de click
-            }
-
-
-            let rotationAngle = 0;
-            let sweepDirectionInRotatedSpace = 0;
-            let heuristicDirectionDescription = "";
-
-            let longestSegmentAngle = 0;
-            let foundLongestSegment = false;
-
-             if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
-                const exteriorCoords = parcelGeometry.coordinates[0];
-                if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
-                     let maxLength = 0;
-                     let p1Longest = null;
-                     let p2Longest = null;
-
-                     for (let i = 0; i < exteriorCoords.length - 1; i++) {
-                         const p1 = turf.point(exteriorCoords[i]);
-                         const p2 = turf.point(exteriorCoords[i+1]);
+                   } else {
+                        // Si el ángulo está justo en 45/135/225/315, podemos elegir arbitrariamente, o usar el barrido que resulte en más pasadas
+                        // Para simplificar, usemos una heurística basada en la forma de la bbox rotada.
+                        console.warn("Fallback: Ángulo de rotación cerca de 45/135/225/315. Usando heurística de Bbox rotada para decidir dirección de barrido.");
                          try {
-                            const length = turf.distance(p1, p2, {units: units});
-                            if (length > maxLength) {
-                                maxLength = length;
-                                p1Longest = p1;
-                                p2Longest = p2;
-                            }
-                         } catch(e) {
-                            console.warn("Error calculando distancia para segmento en heurística:", p1, p2, e);
+                              const tempRotatedBbox = turf.bbox(turf.transformRotate(parcelFeature, rotationAngle, {pivot: centroid}));
+                              const tempBboxWidth = turf.distance(turf.point([tempRotatedBbox[0], tempRotatedBbox[1]]), turf.point([tempRotatedBbox[2], tempRotatedBbox[1]]), {units: units});
+                              const tempBboxHeight = turf.distance(turf.point([tempRotatedBbox[0], tempRotatedBbox[1]]), turf.point([tempRotatedBbox[0], tempRotatedBbox[3]]), {units: units});
+                              if (tempBboxHeight >= tempBboxWidth) { // Si la bbox rotada es más alta que ancha (o igual)
+                                   // Barrido S-N en espacio rotado (pasadas O-E)
+                                   sweepDirectionInRotatedSpace = 0;
+                                    console.log("Fallback: Bbox rotada más alta que ancha. Barrido S->N en espacio rotado.");
+                              } else {
+                                   // Barrido O-E en espacio rotado (pasadas S-N)
+                                    sweepDirectionInRotatedSpace = 1;
+                                    console.log("Fallback: Bbox rotada más ancha que alta. Barrido O->E en espacio rotado.");
+                              }
+                         } catch (e) {
+                              console.error("Error calculando bbox rotada temporal para decidir dirección de barrido (fallback):", e);
+                               console.warn("Fallback: Fallo al decidir dirección de barrido. Usando S-N por defecto.");
+                              sweepDirectionInRotatedSpace = 0; // Default
                          }
-
-                     }
-
-                     if (p1Longest && p2Longest) {
-                         try {
-                             longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
-                             foundLongestSegment = true;
-                             console.log(`Lado más largo de la parcela original encontrado. Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
-                         } catch(e) {
-                              console.warn("Error calculando bearing para lado más largo:", p1Longest, p2Longest, e);
-                              foundLongestSegment = false;
-                         }
-                     } else {
-                          console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo.");
-                     }
-                } else {
-                    console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos.");
-                }
-             } else {
-                  console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo.");
-             }
-
-            const useLongestSideThreshold = 0.7;
-            let originalParcelBbox = null;
-            let originalBboxWidthMeters = 0;
-            let originalBboxHeightMeters = 0;
-            let originalParcelArea = 0;
-            let originalBboxArea = 0;
-            let originalRectangularity = 0;
-
-             try {
-                  originalParcelBbox = turf.bbox(parcelGeometry);
-                  originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                  originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
-                  originalParcelArea = turf.area(turf.feature(parcelGeometry));
-                  originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
-                  originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
-
-                  console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
-
-             } catch(e) {
-                  console.error("Error calculando Bbox o Rectangularity de la parcela original:", e);
-             }
-
-
-
-            if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
-                rotationAngle = -longestSegmentAngle;
-                sweepDirectionInRotatedSpace = 0;
-                heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
-                 console.log("Heurística: Usando el lado más largo como dirección principal.");
-
-            } else {
-                console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
-                if (originalBboxWidthMeters >= originalBboxHeightMeters) {
-                    rotationAngle = 0;
-                    sweepDirectionInRotatedSpace = 0;
-                    heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
-                } else {
-                    rotationAngle = 90;
-                    sweepDirectionInRotatedSpace = 0;
-                    heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)"; // Log ajustado
-                     console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
-                }
-            }
-
-
-            console.log(`Dirección heurística elegida: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
-            console.log(`El barrido en el espacio rotado será ${sweepDirectionInRotatedSpace === 0 ? 'S-N (para pasadas horizontales O-E)' : 'O-E (para pasadas verticales S-N)'}.`); // Log ajustado
-
-             if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                  console.error("Centroide no válido para la rotación. Deteniendo proceso.");
-                   alert("Error: No se pudo determinar el centroide para la rotación.");
-                  return; // Salir de la función de click
-             }
-
-             let rotatedGeometryForSweepAndPiP = null;
-             try {
-                  // IMPORTANT: Rotate the geometry that resulted from the difference (geometryForCalculations), NOT the simplified one directly.
-                  // Simplification *after* rotation might be needed or beneficial depending on Turf.js behavior.
-                  // Let's rotate the geometryForCalculations first, then potentially simplify the rotated result.
-                  // Reverting to rotate the geometryForCalculations as it's the result of the difference.
-                  // Simplification should ideally happen *after* difference but *before* or *after* rotation.
-                  // Let's stick to the original flow: difference -> simplify -> rotate.
-                  // So we should rotate the finalGeometryToSweep which is the result of difference and simplification.
-
-                   console.log("Rotando la geometría final simplificada para el barrido...");
-                   rotatedGeometryForSweepAndPiP = turf.transformRotate(finalGeometryToSweep, rotationAngle, {pivot: centroid});
-                   // console.log("Geometría LIMPIA, SIMPLIFICADA y ROTADA para barrido/PiP:", JSON.stringify(rotatedGeometryForSweepAndPiP)); // Descomentar para debug
-
-             } catch(e) {
-                  console.error("Error al rotar la geometría final para el barrido:", e);
-                   alert("Error al rotar la geometría para generar pasadas.");
-                  return; // Salir de la función de click
-             }
-
-
-             let rotatedGeometryBbox = null;
-             let rotatedBboxWest = 0, rotatedBboxSouth = 0, rotatedBboxEast = 0, rotatedBboxNorth = 0;
-
-             try {
-                  rotatedGeometryBbox = turf.bbox(rotatedGeometryForSweepAndPiP);
-                  rotatedBboxWest = rotatedGeometryBbox[0];
-                  rotatedBboxSouth = rotatedGeometryBbox[1];
-                  rotatedBboxEast = rotatedGeometryBbox[2];
-                  rotatedBboxNorth = rotatedGeometryBbox[3];
-             } catch(e) {
-                  console.error("Error calculando Bbox de la geometría rotada:", e);
-                   alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                  return; // Salir de la función de click
-             }
-
-
-            let rotatedStartSweepCoordValue;
-            let rotatedEndSweepCoordValue;
-            let rotatedSweepLineStartCoord;
-            let rotatedSweepLineEndCoord;
-            // let rotatedSweepLineDirection; // This variable is not used after assignment
-
-            // Determine the extent of the sweep in the rotated space
-            let sweepExtentInRotatedSpace = 0;
-            if (sweepDirectionInRotatedSpace === 0) { // Sweeping S-N in rotated space (for horizontal passes)
-                 rotatedStartSweepCoordValue = rotatedBboxSouth;
-                 rotatedEndSweepCoordValue = rotatedBboxNorth;
-                 rotatedSweepLineStartCoord = rotatedBboxWest;
-                 rotatedSweepLineEndCoord = rotatedBboxEast;
-                 sweepExtentInRotatedSpace = turf.distance(
-                     turf.point([rotatedBboxWest, rotatedBboxSouth]),
-                     turf.point([rotatedBboxWest, rotatedBboxNorth]),
-                     {units: units}
-                 );
-                 // rotatedSweepLineDirection = 90; // Direction of the pass line itself (O-E)
-
-            } else { // Sweeping O-E in rotated space (for vertical passes)
-                 rotatedStartSweepCoordValue = rotatedBboxWest;
-                 rotatedEndSweepCoordValue = rotatedBboxEast;
-                  rotatedSweepLineStartCoord = rotatedBboxSouth;
-                  rotatedSweepLineEndCoord = rotatedBboxNorth;
-                   sweepExtentInRotatedSpace = turf.distance(
-                       turf.point([rotatedBboxWest, rotatedBboxSouth]),
-                       turf.point([rotatedBboxEast, rotatedBboxSouth]),
-                       {units: units}
-                   );
-                 // rotatedSweepLineDirection = 0; // Direction of the pass line itself (S-N)
-            }
-
-             console.log(`Extensión total del barrido en espacio rotado (a lo largo del eje perpendicular a las pasadas): ${sweepExtentInRotatedSpace.toFixed(2)} ${units}`);
-
-
-           // Calculate number of passes needed based on the sweep extent and working width
-           const numberOfPasses = Math.ceil(sweepExtentInRotatedSpace / workingWidth);
-           console.log(`Se generarán aproximadamente ${numberOfPasses} pasadas con un ancho de ${workingWidth}m.`);
-
-
-            let rotatedCurrentOffset = workingWidth / 2; // Start the first pass line centered within the first strip
-            const samplingDistance = 1; // Distance between points on each pass line segment
-
-
-            let generatedRotatedPasses = [];
-
-            // Use the rotated, simplified geometry for Point-in-Polygon checks
-            const geometryForPiPCheck = rotatedGeometryForSweepAndPiP;
-
-
-           if (workingWidth <= 0 || sweepExtentInRotatedSpace <= 0) {
-               console.warn("Ancho de trabajo o extensión del barrido <= 0. No se generarán pasadas.");
-               alert("Ancho de trabajo inválido o área a barrer muy pequeña.");
-               return; // Salir de la función de click
-           } else {
-                const sweepLimit = sweepExtentInRotatedSpace + (workingWidth * 0.1); // Add a small buffer to ensure coverage
-                let passCounter = 0;
-                while (rotatedCurrentOffset <= sweepLimit) { // Iterate through the offset perpendicular to the sweep direction
-                   passCounter++;
-                   // console.log(`Generando pasada #${passCounter} con offset ${rotatedCurrentOffset.toFixed(2)}m`); // Log detallado
-
-                   let pointOnSweepAxis = null;
-                    try {
-                        // Calculate a point on the axis perpendicular to the passes at the current offset
-                        // Start from the southwest corner of the rotated bbox for consistency
-                        pointOnSweepAxis = turf.destination(
-                            turf.point([rotatedBboxWest, rotatedBboxSouth]), // Southwest corner of rotated bbox
-                            rotatedCurrentOffset / 1000, // Distance in kilometers
-                            sweepDirectionInRotatedSpace === 0 ? 0 : 90, // Direction: 0 for S-N sweep, 90 for O-E sweep
-                            {units: 'kilometers'}
-                        );
-                         // console.log("Punto en eje de barrido (en espacio rotado):", JSON.stringify(pointOnSweepAxis)); // Log detallado
-
-                    } catch(e) {
-                        console.error(`Error en turf.destination al calcular punto en eje de barrido para offset ${rotatedCurrentOffset.toFixed(2)}. Saltando esta pasada.`, e);
-                        rotatedCurrentOffset += workingWidth;
-                        continue;
-                    }
-
-                    if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
-                         console.warn(`turf.destination devolvió un punto inválido para offset ${rotatedCurrentOffset.toFixed(2)}. Saltando esta pasada.`);
-                         rotatedCurrentOffset += workingWidth;
-                         continue;
-                    }
-
-
-                   let passLineStartCoord = null;
-                   let passLineEndCoord = null;
-
-                    // Determine the start and end coordinates of the full pass line across the rotated bbox
-                   if (sweepDirectionInRotatedSpace === 0) { // Horizontal passes (O-E)
-                       passLineStartCoord = [rotatedBboxWest, pointOnSweepAxis.geometry.coordinates[1]]; // Use Y from pointOnSweepAxis
-                       passLineEndCoord = [rotatedBboxEast, pointOnSweepAxis.geometry.coordinates[1]];   // Use Y from pointOnSweepAxis
-                   } else { // Vertical passes (S-N)
-                       passLineStartCoord = [pointOnSweepAxis.geometry.coordinates[0], rotatedBboxSouth]; // Use X from pointOnSweepAxis
-                       passLineEndCoord = [pointOnSweepAxis.geometry.coordinates[0], rotatedBboxNorth];   // Use X from pointOnSweepAxis
                    }
 
-                   let fullSweepLineInRotatedSpace = null;
-                    try {
-                       fullSweepLineInRotatedSpace = turf.lineString([passLineStartCoord, passLineEndCoord]);
-                        // console.log("Línea de barrido completa (en espacio rotado):", JSON.stringify(fullSweepLineInRotatedSpace)); // Descomentar para debug
+                 console.log(`Ángulo de rotación basado en heurística (fallback): ${rotationAngle.toFixed(2)}°, Dirección de barrido en espacio rotado (0=S-N, 1=O-E): ${sweepDirectionInRotatedSpace}`);
 
-                    } catch(e) {
-                         console.error(`Error en turf.lineString al crear línea de barrido completa para offset ${rotatedCurrentOffset.toFixed(2)}. Saltando esta pasada.`, e);
-                        rotatedCurrentOffset += workingWidth;
-                        continue;
-                    }
-
-                     if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
-                          console.warn(`La línea de barrido completa no es válida (esperado LineString) para offset ${rotatedCurrentOffset.toFixed(2)}. Saltando esta pasada.`);
-                          rotatedCurrentOffset += workingWidth;
-                          continue;
-                     }
+                // --- Fin Lógica para determinar el ángulo de rotación ---
 
 
-                   let lineLength = 0;
-                    try {
-                         lineLength = turf.length(fullSweepLineInRotatedSpace, {units: units});
-                    } catch(e) {
-                         console.error(`Error en turf.length al calcular longitud de línea de barrido para offset ${rotatedCurrentOffset.toFixed(2)}. Saltando esta pasada.`, e);
-                        rotatedCurrentOffset += workingWidth;
-                        continue;
-                    }
+                console.log(`Dirección elegida para el barrido: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
+                console.log(`El barrido en el espacio rotado será ${sweepDirectionInRotatedSpace === 0 ? 'N-S (para pasadas O-E)' : 'O-E (para pasadas S-N)'}.`);
+
+                 if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
+                      console.error("Centroide no válido para la rotación. Deteniendo proceso.");
+                       alert("Error: No se pudo determinar el centroide para la rotación.");
+                      return;
+                 }
+
+                 let rotatedGeometryForSweepAndPiP = null;
+                 try {
+                      // Rotar la geometría limpia (después de excluir áreas a evitar) usando el ángulo calculado
+                      rotatedGeometryForSweepAndPiP = turf.transformRotate(geometryForCalculations, rotationAngle, {pivot: centroid});
+                       console.log("Geometría LIMPIA, SIMPLIFICADA y ROTADA para barrido/PiP:", JSON.stringify(rotatedGeometryForSweepAndPiP));
+                 } catch(e) {
+                      console.error("Error al rotar la geometría final para el barrido:", e);
+                       alert("Error al rotar la geometría para generar pasadas.");
+                      return;
+                 }
 
 
-                   let currentSegmentPoints = [];
+                 let rotatedGeometryBbox = null;
+                 let rotatedBboxWest = 0, rotatedBboxSouth = 0, rotatedBboxEast = 0, rotatedBboxNorth = 0;
 
-                   // Sample points along the full sweep line and check if they are inside the cleaned area
-                   for (let i = 0; i <= lineLength; i += samplingDistance) {
-                       let point = null;
-                       try {
-                           point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
-                       } catch(e) {
-                           console.warn(`Error en turf.along al muestrear punto en distancia ${i} para offset ${rotatedCurrentOffset.toFixed(2)}. Saltando punto.`, e);
-                           continue;
-                       }
+                 try {
+                      rotatedGeometryBbox = turf.bbox(rotatedGeometryForSweepAndPiP);
+                      rotatedBboxWest = rotatedGeometryBbox[0];
+                      rotatedBboxSouth = rotatedGeometryBbox[1];
+                      rotatedBboxEast = rotatedGeometryBbox[2];
+                      rotatedBboxNorth = rotatedGeometryBbox[3];
+                 } catch(e) {
+                      console.error("Error calculando Bbox de la geometría rotada:", e);
+                       alert("Error calculando límites de la geometría rotada para generar pasadas.");
+                      return;
+                 }
 
-                       if (!point || !point.geometry || !point.geometry.coordinates) {
-                            console.warn(`turf.along en distancia ${i} para offset ${rotatedCurrentOffset.toFixed(2)} devolvió punto inválido. Saltando punto.`);
+
+                let rotatedStartSweepCoordValue;
+                let rotatedEndSweepCoordValue;
+                let rotatedSweepLineStartCoord;
+                let rotatedSweepLineEndCoord;
+                // let rotatedSweepLineDirectionAngle; // No se usa directamente después
+
+                if (sweepDirectionInRotatedSpace === 0) {
+                    rotatedStartSweepCoordValue = rotatedBboxSouth;
+                    rotatedEndSweepCoordValue = rotatedBboxNorth;
+                    rotatedSweepLineStartCoord = rotatedBboxWest;
+                    rotatedSweepLineEndCoord = rotatedBboxEast;
+                    // rotatedSweepLineDirectionAngle = 90; // Dirección de la línea de barrido en el espacio rotado (Este)
+
+                     console.log("Barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
+                } else {
+                    rotatedStartSweepCoordValue = rotatedBboxWest;
+                    rotatedEndSweepCoordValue = rotatedBboxEast;
+                     rotatedSweepLineStartCoord = rotatedBboxSouth;
+                     rotatedSweepLineEndCoord = rotatedBboxNorth;
+                     // rotatedSweepLineDirectionAngle = 0; // Dirección de la línea de barrido en el espacio rotado (Norte)
+
+                     console.log("Barrido O->E en espacio rotado para generar pasadas verticales (S->N).");
+                }
+
+                let totalSweepExtentMeters = 0;
+                 try {
+                     // Extensión total perpendicular a la dirección de barrido (distancia a lo largo de la Bbox perpendicular)
+                     totalSweepExtentMeters = turf.distance(
+                        turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
+                        turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxNorth] : [rotatedBboxEast, rotatedBboxSouth]),
+                        {units: units}
+                     );
+                     console.log(`Extensión total del barrido en espacio rotado (a lo largo de la Bbox perpendicular a las pasadas): ${totalSweepExtentMeters.toFixed(2)} ${units}`);
+
+                 } catch(e) {
+                     console.error("Error calculando extensión del barrido de la bbox rotada:", e);
+                      alert("Error calculando límites de la geometría rotada para generar pasadas.");
+                     return;
+                 }
+
+
+               let rotatedCurrentOffset = workingWidth / 2; // Empezar la primera pasada a medio ancho del borde
+               const samplingDistance = 1; // Distancia de muestreo a lo largo de la línea de pasada (en metros)
+               const geometryForPiPCheck = rotatedGeometryForSweepAndPiP; // Geometría limpia y rotada para el Point in Polygon
+
+               console.log(`Generando pasadas de ${workingWidth}m en espacio rotado (muestreo de ${samplingDistance}m).`);
+
+                let generatedRotatedPasses = [];
+
+
+               if (workingWidth <= 0 || totalSweepExtentMeters <= 0) {
+                   console.warn("Ancho de trabajo o extensión del barrido <= 0. No se generarán pasadas.");
+                   alert("Ancho de trabajo inválido o área a barrer muy pequeña.");
+                   return;
+               } else {
+                     // Barrer desde el borde 'sur' o 'oeste' de la bbox rotada hasta el borde 'norte' o 'este'
+                     // El límite de barrido debe extenderse un poco más allá del final para cubrir el borde opuesto
+                     const sweepLimit = totalSweepExtentMeters; // Barrer a lo largo de toda la extensión
+
+                    while (rotatedCurrentOffset <= sweepLimit + workingWidth / 2) {
+
+                       // Calcular un punto en el eje perpendicular al barrido (donde se centra la pasada actual)
+                       let pointOnSweepAxis = null;
+                        try {
+                            // Empezar desde el punto de inicio del barrido (ej: esquina SW si barrido S->N)
+                            pointOnSweepAxis = turf.destination(
+                                turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
+                                rotatedCurrentOffset, // Distancia en metros para turf.destination (usando units:'meters')
+                                sweepDirectionInRotatedSpace === 0 ? 0 : 90, // Dirección del "offset" (0=N para barrido S->N, 90=E para barrido O->E)
+                                {units: units} // Usar unidades correctas (meters)
+                            );
+                        } catch(e) {
+                            console.error("Error en turf.destination al calcular punto en eje de barrido:", e);
+                            rotatedCurrentOffset += workingWidth;
                             continue;
-                       }
+                        }
+
+                        if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
+                             console.warn("turf.destination devolvió un punto inválido en el eje de barrido. Saltando esta pasada.");
+                             rotatedCurrentOffset += workingWidth;
+                             continue;
+                        }
+
+                       // La coordenada relevante para la línea de pasada actual (Lat si barrido S->N, Lng si barrido O->E)
+                       let passCenterCoordValue = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
 
 
-                       let isInside = false;
-                       if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
+                       // Crear una línea de barrido que cubra todo el ancho/alto de la Bbox rotada en la coordenada de pasada actual
+                       let fullSweepLineInRotatedSpace = null;
+                        try {
+                           if (sweepDirectionInRotatedSpace === 0) {
+                                // Línea horizontal (Oeste a Este)
+                                fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoordValue], [rotatedBboxEast, passCenterCoordValue]]);
+                           } else {
+                                // Línea vertical (Sur a Norte)
+                                fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoordValue, rotatedBboxSouth], [passCenterCoordValue, rotatedBboxNorth]]);
+                           }
+                        } catch(e) {
+                             console.error("Error en turf.lineString al crear línea de barrido completa:", e);
+                            rotatedCurrentOffset += workingWidth;
+                            continue;
+                        }
+
+                         if (!fullSweepLineInRotatedSpace || !fullSweepLineInRotatedSpace.geometry || fullSweepLineInRotatedSpace.geometry.type !== 'LineString') {
+                              console.warn("La línea de barrido completa no es válida (esperado LineString). Saltando esta pasada.");
+                              rotatedCurrentOffset += workingWidth;
+                              continue;
+                         }
+
+
+                       let lineLength = 0;
+                        try {
+                             lineLength = turf.length(fullSweepLineInRotatedSpace, {units: units});
+                        } catch(e) {
+                             console.error("Error en turf.length al calcular longitud de línea de barrido:", e);
+                            rotatedCurrentOffset += workingWidth;
+                            continue;
+                        }
+
+
+                       let currentSegmentPoints = [];
+
+                       // Muestrear puntos a lo largo de la línea de barrido completa
+                       for (let i = 0; i <= lineLength; i += samplingDistance) {
+                           let point = null;
                            try {
-                               // Check if the sampled point is inside the cleaned, simplified, and rotated geometry
-                               isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
+                               // Obtener el punto en la línea de barrido a la distancia 'i'
+                               point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
                            } catch(e) {
-                               console.warn(`Error durante booleanPointInPolygon para punto en muestreo (distancia ${i}, offset ${rotatedCurrentOffset.toFixed(2)}).`, point, e);
+                               console.warn("Error en turf.along al muestrear punto.", i, e);
+                               continue;
+                           }
+
+                           if (!point || !point.geometry || !point.geometry.coordinates) {
+                                console.warn(`turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
+                                continue;
+                           }
+
+                           // Verificar si el punto está dentro de la geometría limpia y rotada
+                           let isInside = false;
+                           if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
+                               try {
+                                   isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
+                               } catch(e) {
+                                   console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
+                                   isInside = false;
+                               }
+                           } else {
+                               console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
                                isInside = false;
                            }
-                       } else {
-                           // This case should ideally not happen if previous steps were successful
-                           console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
-                           isInside = false; // Assume not inside if check is impossible
-                       }
 
 
-                       if (isInside && point && point.geometry && point.geometry.coordinates) {
-                           currentSegmentPoints.push(point.geometry.coordinates);
-                       } else {
-                           // If the point is not inside OR we are at the beginning/end of a segment
-                           if (currentSegmentPoints.length > 1) {
-                                // If we have collected more than one point, form a line segment
-                                try {
-                                    generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
-                                } catch(e) {
-                                    console.error(`Error en turf.lineString al crear segmento de pasada rotada (terminando segmento) para offset ${rotatedCurrentOffset.toFixed(2)}.`, e);
-                                }
+                           if (isInside && point && point.geometry && point.geometry.coordinates) {
+                               // Si el punto está dentro, añadir sus coordenadas al segmento actual
+                               currentSegmentPoints.push(point.geometry.coordinates);
+                           } else {
+                               // Si el punto está fuera, el segmento actual ha terminado
+                               if (currentSegmentPoints.length > 1) {
+                                    // Si el segmento tiene al menos 2 puntos, es una línea válida
+                                    try {
+                                        generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
+                                    } catch(e) {
+                                        console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
+                                    }
+                               }
+                               // Reiniciar el segmento de puntos
+                               currentSegmentPoints = [];
                            }
-                           // Reset points for the next potential segment
-                           currentSegmentPoints = [];
                        }
-                   }
 
-                   // After the loop, check if the last collected points form a segment
-                   if (currentSegmentPoints.length > 1) {
-                        try {
-                            generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
-                       } catch(e) {
-                             console.error(`Error en turf.lineString al crear segmento final de pasada rotada para offset ${rotatedCurrentOffset.toFixed(2)}.`, e);
+                       // Al final de la línea de barrido, añadir el último segmento si existe
+                       if (currentSegmentPoints.length > 1) {
+                            try {
+                                generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
+                           } catch(e) {
+                                console.error("Error en turf.lineString al crear segmento final de pasada rotada:", e);
+                           }
                        }
-                   }
 
-                   rotatedCurrentOffset += workingWidth; // Move to the center of the next strip
+                       // Mover al siguiente offset para la próxima pasada
+                       rotatedCurrentOffset += workingWidth;
+                   }
                }
-           }
 
 
                console.log(`Generadas ${generatedRotatedPasses.length} pasadas (segmentos de LineString) en el espacio rotado.`);
@@ -1416,6 +1456,7 @@
                generatedRotatedPasses.forEach((rotatedPass, index) => {
                    try {
                         if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
+                             // Usar el mismo centroide de rotación que se usó para rotar la geometría de la parcela
                              if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
                                  console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
                                  return;
@@ -1433,26 +1474,21 @@
                    }
                });
 
-               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar dinámicamente) finalizada.");
+               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
                 console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
                console.error("Error general durante la generación de pasadas:", e);
-               // Log the state of key geometries at the time of error for debugging
                console.error("Parcel Geometry (inicio):", JSON.stringify(parcelGeometry));
-               if (typeof currentParcelExclusions !== 'undefined') {
-                    console.error("Current Parcel Exclusions (intersecting, bufferized):", JSON.stringify(currentParcelExclusions));
-               }
-                if (typeof geometryForCalculations !== 'undefined') {
-                    console.error("Geometry for Calculations (after difference):", JSON.stringify(geometryForCalculations));
+               if (typeof geometryForCalculations !== 'undefined') {
+                    console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
                }
                 if (typeof finalGeometryToSweep !== 'undefined') {
-                    console.error("Final Geometry To Sweep (after simplification):", JSON.stringify(finalGeometryToSweep));
+                    console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryToSweep));
                }
                 if (typeof geometryForSweepAndPiP !== 'undefined') {
-                     console.error("Geometry For Sweep And PiP (polygon for sweep/pip):", JSON.stringify(geometryForSweepAndPiP));
+                     console.error("Geometry For Sweep And PiP (polígono más grande):", JSON.stringify(geometryForSweepAndPiP));
                 }
-
 
                alert("Ocurrió un error al generar las pasadas. Revisa la consola para detalles.");
            }
@@ -1463,44 +1499,39 @@
             // Comprobar si el navegador soporta la API de Geolocation
             if (!navigator.geolocation) {
                 console.log("Tu navegador no soporta geolocalización.");
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Geolocalización no soportada')) {
                       loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
                  }
-                alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria para mostrar tu posición.");
                 return;
             }
 
             // Si ya estamos observando, no iniciar otro watchPosition
             if (watchingLocation) {
                  console.log("watchPosition ya está activo.");
-                 // Si ya tenemos una localización, centrar el mapa
+                 // Si ya tenemos una localización, centrar el mapa al hacer clic en el botón
                  if (lastKnownLocation) {
-                      map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                      map.setView(lastKnownLocation, Math.max(map.getZoom(), map.getZoom() < 16 ? 16 : map.getZoom())); // Centra y ajusta zoom a al menos 16
                       console.log("Centrando mapa en la última localización conocida.");
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                          loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
+                            loadingStatusDiv.textContent = 'Datos cargados. Mapa centrado en tu posición.';
+                       } else if (loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                             loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Localización encontrada.', 'Mapa centrado en tu posición.');
+                       } else if (loadingStatusDiv.textContent.includes('Error de localización')) {
+                             // Si hubo un error de localización antes, actualizamos el mensaje para indicar que se intentó centrar en la última posición conocida
+                              loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace(/Error de localización:.*/, 'Mapa centrado en tu última posición conocida.');
+
                        }
-                 } else {
-                     console.log("watchPosition activo, pero aún sin localización. Esperando...");
-                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                           loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
-                      }
+
+
+            } else {
+                 // Si no tenemos una localización o watchPosition no está activo, intentar iniciar/reiniciar
+                 console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
+                 // Llamar a locateUser() intentará iniciar watchPosition si no está activo
+                 locateUser();
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización') && !loadingStatusDiv.textContent.includes('Error de localización')) {
+                       loadingStatusDiv.textContent += ' Buscando localización...';
                  }
-                 return;
             }
-
-            console.log("Iniciando observación de localización GPS...");
-            watchingLocation = true; // Marca que watchPosition está activo
-            navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
-                enableHighAccuracy: true, // Solicitar la mejor precisión posible
-                timeout: 15000,           // Tiempo máximo para esperar una respuesta (aumentado a 15 segundos)
-                maximumAge: 0             // No usar una posición cacheada, siempre intentar obtener una nueva
-            });
-
-            if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                loadingStatusDiv.textContent = 'Cargando datos geoespaciales y buscando localización...';
-            }
-
         }
 
         function onLocationFound(e) {
@@ -1524,7 +1555,8 @@
                 radius: 8,
                 color: '#0055FF',
                 fillColor: '#0055FF',
-                fillOpacity: 1
+                fillOpacity: 1,
+                className: 'location-marker' // Añadir una clase para identificarlo si es necesario
             }).addTo(map);
 
             // Añadir un círculo para mostrar la precisión
@@ -1547,9 +1579,11 @@
             }
 
 
-             // Actualizar el estado de carga
+             // Actualizar el estado de carga (manteniendo mensajes de error/advertencia si existen)
              if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                  loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+             } else if (loadingStatusDiv.textContent.includes('Buscando localización')) {
+                 loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', 'Localización encontrada.');
              }
 
 
@@ -1558,31 +1592,42 @@
         function onLocationError(e) {
             console.error(`Error de localización (${e.code}): ${e.message}`);
             watchingLocation = false; // watchPosition dejó de funcionar o no se pudo iniciar
+            lastKnownLocation = null; // Limpiar la última posición conocida
 
-            let errorMessage = "Error al obtener la localización: ";
+            let errorMessageText = "";
 
             switch (e.code) {
                 case 1:
-                    errorMessage += "Permiso denegado. Para mostrar tu posición, permite el acceso a la geolocalización.";
-                    alert("Para mostrar tu posición, por favor permite el acceso a la geolocalización en la configuración de tu navegador.");
+                    errorMessageText = "Permiso denegado. Permite el acceso a la geolocalización.";
+                    // El alert ya se muestra en la primera llamada a locateUser si falla por permiso
                     break;
                 case 2:
-                    errorMessage += "Posición no disponible. Asegúrate de tener buena señal GPS.";
+                    errorMessageText = "Posición no disponible. Asegúrate de tener buena señal GPS.";
                      alert("Tu posición no está disponible (señal GPS débil o desactivado).");
                     break;
                 case 3:
-                    errorMessage += "Tiempo de espera agotado.";
+                    errorMessageText = "Tiempo de espera agotado al buscar localización.";
                      alert("Tiempo de espera agotado al buscar tu localización. Asegúrate de tener buena señal GPS.");
                     break;
                 default:
-                    errorMessage += `Error desconocido: ${e.message}`;
-                     alert(errorMessage + " Revisa la consola para más detalles.");
+                    errorMessageText = `Error desconocido: ${e.message}`;
+                     alert(errorMessageText + " Revisa la consola para más detalles.");
                     break;
             }
              // Solo actualiza el estado si no hay un error de carga de datos fatal
              if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                  loadingStatusDiv.textContent = 'Datos cargados. ' + errorMessage;
+                  // Reemplazar solo la parte de localización si está presente
+                  if (loadingStatusDiv.textContent.includes('Buscando localización')) {
+                      loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', `Error de localización: ${errorMessageText}`);
+                  } else if (loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                       loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Localización encontrada.', `Error de localización: ${errorMessageText}`);
+                  } else if (!loadingStatusDiv.textContent.includes('Error de localización')) {
+                       // Si no hay mensaje de localización ni error de localización, añadir el mensaje de error
+                       loadingStatusDiv.textContent += ` Error de localización: ${errorMessageText}`;
+                  }
+
              }
+
 
              // Eliminar el marcador y círculo si hubo un error
              if (locationMarker) {
@@ -1593,7 +1638,7 @@
                 map.removeLayer(accuracyCircle);
                 accuracyCircle = null;
              }
-             lastKnownLocation = null; // Limpiar la última posición conocida
+
         }
         // --- Fin Lógica de Localización GPS ---
 
@@ -1602,18 +1647,26 @@
             console.log("Botón de localización pulsado.");
             if (lastKnownLocation) {
                  // Si ya tenemos una localización, simplemente centramos el mapa en ella
-                 map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                 map.setView(lastKnownLocation, Math.max(map.getZoom(), map.getZoom() < 16 ? 16 : map.getZoom())); // Centra y ajusta zoom a al menos 16
                  console.log("Centrando mapa en la última localización conocida al pulsar el botón.");
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                        loadingStatusDiv.textContent = 'Datos cargados. Mapa centrado en tu posición.';
-                 }
+                 } else if (loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                             loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Localización encontrada.', 'Mapa centrado en tu posición.');
+                 } else if (loadingStatusDiv.textContent.includes('Error de localización')) {
+                             // Si hubo un error de localización antes, actualizamos el mensaje para indicar que se intentó centrar en la última posición conocida
+                              loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace(/Error de localización:.*/, 'Mapa centrado en tu última posición conocida.');
+
+                       }
+
 
             } else {
                  // Si no tenemos una localización o watchPosition no está activo, intentar iniciar/reiniciar
                  console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
-                 locateUser(); // Llamar a la función que inicia watchPosition
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                       loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                 // Llamar a locateUser() intentará iniciar watchPosition si no está activo
+                 locateUser();
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización') && !loadingStatusDiv.textContent.includes('Error de localización')) {
+                       loadingStatusDiv.textContent += ' Buscando localización...';
                  }
             }
         });
