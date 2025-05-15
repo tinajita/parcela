@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
+    <title>Mapa con Generación de Pasadas </title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -139,13 +139,21 @@
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@1.0.7/dist/geotiff.min.js"></script> <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
         if (typeof turf === 'undefined') {
              console.error("VERIFICACIÓN: 'turf' es undefined justo después del script tag. El script de Turf.js NO se cargó o ejecutó como se esperaba.");
         } else {
              console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
         }
+         console.log("Estado de 'GeoTIFF' inmediatamente después del script tag:", typeof GeoTIFF);
+        if (typeof GeoTIFF === 'undefined') {
+             console.error("VERIFICACIÓN: 'GeoTIFF' es undefined justo después del script tag. El script de GeoTIFF.js NO se cargó o ejecutó como se esperaba.");
+        } else {
+             console.log("VERIFICACIÓN: 'GeoTIFF' parece estar definido. Tipo:", typeof GeoTIFF);
+        }
+        // Si necesitas proj4js, descomenta la línea y verifica su estado similarmente.
+        // console.log("Estado de 'proj4' inmediatamente después del script tag:", typeof proj4);
     </script>
 
 
@@ -160,7 +168,7 @@
         let construccionesLayer = null; // Capa para construcciones (exclusión)
         let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
         let curvasNivelLayer = null; // Variable para la capa de curvas de nivel
-        let mdtLayer = null; // Variable para la capa del MDT (aunque no se use para cálculo de pendiente automática)
+        let mdtImage = null; // Variable para almacenar la imagen TIFF del MDT procesada por geotiff.js
         window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
@@ -247,7 +255,7 @@
             loadingStatusDiv.textContent = 'Cargando datos geoespaciales...';
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
-            // --- Iniciar localización GPS (independiente de la carga de datos geoespaciales) ---
+            // --- Iniciar localización GPS (independiente de la carga de datos geoespacial) ---
              // Solo iniciamos watchPosition una vez al cargar si el navegador lo soporta
              if (navigator.geolocation) {
                  if (!watchingLocation) {
@@ -255,23 +263,31 @@
                      watchingLocation = true; // Marca que watchPosition está activo
                      navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
                          enableHighAccuracy: true,
-                         timeout: 10000,
+                         timeout: 15000,
                          maximumAge: 0
                      });
-                     loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+                     if (!loadingStatusDiv.textContent.includes('buscando localización')) {
+                        loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+                     }
 
                  } else {
                      console.log("watchPosition ya está activo.");
                       if (lastKnownLocation) {
-                           loadingStatusDiv.textContent += ' Localización encontrada.';
+                           if (!loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                                loadingStatusDiv.textContent += ' Localización encontrada.';
+                           }
                       } else {
-                           loadingStatusDiv.textContent += ' Buscando localización...';
+                           if (!loadingStatusDiv.textContent.includes('buscando localización')) {
+                               loadingStatusDiv.textContent += ' Buscando localización...';
+                           }
                       }
                  }
              } else {
                  console.log("Tu navegador no soporta geolocalización.");
-                 loadingStatusDiv.textContent += ' Error: Geolocalización no soportada.';
-                 alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria.");
+                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                      loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
+                 }
+                //  alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria."); // Evitar doble alert si ya hay error
              }
 
 
@@ -306,16 +322,34 @@
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
                  }),
-                 // Nueva promesa para intentar cargar el MDT (TIFF) - no se usa para cálculo de pendiente automático en este código
-                 fetch(mdtGeoTiffDataUrl).then(response => {
+                 // Nueva promesa para procesar el MDT (TIFF) con geotiff.js
+                 fetch(mdtGeoTiffDataUrl).then(async response => {
                       if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
-                       // Para TIFF, simplemente retornamos la respuesta para saber que se cargó (o no)
                        console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                      return response; // No procesamos el contenido aquí para este código
+                       try {
+                           const arrayBuffer = await response.arrayBuffer(); // Lee el contenido binario
+                           const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer); // Abre el TIFF con geotiff.js
+                           mdtImage = await tiff.getImage(); // Obtiene la primera (o única) imagen
+
+                           console.log("MDT (TIFF) procesado con geotiff.js. Dimensiones:", mdtImage.getWidth(), "x", mdtImage.getHeight());
+                            // Aquí podrías almacenar información relevante del TIFF si la necesitas globalmente
+                            // window.mdtImage = mdtImage; // Si quieres que sea global
+
+                       } catch (e) {
+                           console.error("Error al procesar MDT (TIFF) con geotiff.js:", e);
+                           // No lanzar error aquí para no detener Promise.all, manejar el fallo de MDT más adelante
+                           return null; // Indica que el procesamiento del MDT falló
+                       }
+                       return mdtImage; // Retorna la imagen procesada si fue exitoso
+
                  })
             ])
-            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => { // Añadir los parámetros correspondientes
-                console.log("Los archivos GeoJSON y MDT se cargaron con éxito (primer paso de fetch/json/response).");
+            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, processedMdtImage]) => { // Asegúrate de recibir processedMdtImage
+                console.log("Los archivos GeoJSON se cargaron con éxito. Intento de procesamiento de MDT completado.");
+
+                // Asignar la imagen MDT procesada a la variable global (o local si prefieres)
+                mdtImage = processedMdtImage; // mdtImage ahora contiene la imagen TIFF o es null si falló el procesamiento
+
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
                 console.log("Inspeccionando y cargando capa de Parcelas...");
@@ -345,7 +379,10 @@
                      console.log(`Parcelas cargadas en Leaflet. Número de features en datos brutos: ${parcelasGeojsonData.features.length}`);
                  } else {
                      console.error("Datos de Parcelas no son un FeatureCollection válido o están vacíos.", parcelasGeojsonData);
-                      loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.'; // Sobrescribir si hay error de carga de datos
+                      // Sobrescribir si hay error de carga de datos principal
+                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                          loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.';
+                      }
                      alert("Error: El archivo de Parcelas no contiene un FeatureCollection válido. No se pueden cargar las parcelas.");
                  }
 
@@ -368,7 +405,7 @@
                        console.log(`Construcciones cargadas en Leaflet. Número de features en datos brutos: ${construccionesGeojsonData.features.length}.`);
                  } else {
                      console.warn("Datos de Construcciones no son un FeatureCollection válido o están vacíos. No se cargarán construcciones.", construccionesGeojsonData);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) { // Solo añadir si no hay error de carga de datos principal
                           loadingStatusDiv.textContent += ' Advertencia: Datos de Construcciones inválidos.';
                        }
                  }
@@ -420,7 +457,7 @@
                        console.log(`Elementos Internos cargados en Leaflet. Número de features en datos brutos: ${elementosInternosGeojsonData.features.length}.`);
                   } else {
                       console.warn("Datos de Elementos Internos no son un FeatureCollection válido o están vacíos. No se cargarán elementos internos.", elementosInternosGeojsonData);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) { // Solo añadir si no hay error de carga de datos principal
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Viales/Arroyos inválidos.';
                        }
                  }
@@ -476,27 +513,22 @@
 
                   } else {
                       console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) { // Solo añadir si no hay error de carga de datos principal
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
                  }
                 // --- Fin del código para curvas de nivel ---
 
-                // --- Código para manejar la carga del MDT (TIFF) - No se crea una capa visible por defecto ---
-                 console.log("Intento de carga de MDT (TIFF) completado.");
-                 // Puedes añadir aquí código para procesar el TIFF si tuvieras una librería JS capaz de hacerlo,
-                 // o simplemente usar esta confirmación de carga para saber que el archivo existe en la URL.
-                 if (mdtTiffResponse && mdtTiffResponse.ok) {
-                      console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
-                      // Aquí podrías añadir una capa de TileLayer si tuvieras un servidor sirviendo el MDT como teselas WMS/XYZ
-                      // o usar una librería como geotiff.js para leer el ráster si es necesario para futuros desarrollos de análisis.
+                // --- Manejar el resultado del procesamiento del MDT (ya se intentó procesar en el fetch) ---
+                 if (mdtImage) {
+                      console.log("MDT (TIFF) procesado y listo para usar.");
+                       // No creamos una capa visual del MDT por defecto, pero podrías añadirla aquí si quieres.
                  } else {
-                      console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) { // Solo añadir si no hay error de carga de datos principal
-                          loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar MDT TIFF.';
-                       }
+                      console.warn("MDT (TIFF) no pudo ser procesado. El cálculo de pendiente no estará disponible.");
+                      if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
+                           loadingStatusDiv.textContent += ' Advertencia: MDT TIFF no procesado.';
+                      }
                  }
-                // --- Fin código MDT ---
 
 
                  console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos: ${window.exclusionFeatures.length}`);
@@ -514,7 +546,7 @@
                       map.setView([36.7462, -5.1612], 14); // Fallback
                 }
 
-                // Actualizar el mensaje de estado solo si no hay errores de carga de datos y watchPosition ya se intentó iniciar
+                // Actualizar el mensaje de estado solo si no hay errores/advertencias previos
                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                      if (watchingLocation) {
                            if (lastKnownLocation) {
@@ -523,9 +555,21 @@
                                 loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
                            }
                      } else {
-                         loadingStatusDiv.textContent = 'Datos cargados. Geolocalización no soportada o no iniciada.';
+                         loadingStatusDiv.textContent = 'Datos cargados. Geolocalización no soportada.';
+                     }
+                } else if (loadingStatusDiv.textContent === 'Cargando datos geoespaciales... y buscando localización...') {
+                     // Si solo se añadió el mensaje de localización y hubo errores/advertencias después
+                      if (watchingLocation) {
+                           if (lastKnownLocation) {
+                               loadingStatusDiv.textContent = 'Datos geoespaciales con advertencias/errores. Localización encontrada.';
+                           } else {
+                                loadingStatusDiv.textContent = 'Datos geoespaciales con advertencias/errores. Buscando localización...';
+                           }
+                     } else {
+                         loadingStatusDiv.textContent = 'Datos geoespaciales con advertencias/errores. Geolocalización no soportada.';
                      }
                 }
+
 
                 console.log("Carga automática de datos finalizada. Selecciona una parcela para habilitar la generación de pasadas.");
 
@@ -542,7 +586,7 @@
 
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS ---
 
-        generarPasadasBtn.addEventListener('click', function() {
+        generarPasadasBtn.addEventListener('click', async function() { // Convertir a async para usar await con geotiff.js
 
             // --- VERIFICACIÓN DE TURF ---
             console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
@@ -552,6 +596,11 @@
                 return;
             }
             // --- FIN VERIFICACIÓN ---
+             // --- VERIFICACIÓN DE GEOTIFF.JS ---
+            console.log("Estado de 'GeoTIFF' al hacer clic en Generar Pasadas:", typeof GeoTIFF);
+             // No hacemos un return si no está disponible, ya que la generación de pasadas puede funcionar sin MDT.
+             // Simplemente mostraremos una advertencia y usaremos la lógica de fallback.
+
 
             console.log("--- Inicio Generación de Pasadas ---");
             console.log("Estado de window.exclusionFeatures al inicio del click:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null', window.exclusionFeatures);
@@ -866,7 +915,7 @@
                                        if (areaCalculated === 0) {
                                             console.log("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar (área limpia = 0).");
                                             alert("Advertencia: La parcela seleccionada parece estar completamente cubierta por áreas a evitar. No se pueden generar pasadas útiles.");
-                                            console.log("Revirtiendo a geometría original de la parcela según la lógica actual.");
+                                            console.log("Revertiendo a geometría original de la parcela según la lógica actual.");
                                             geometryForCalculations = parcelGeometry;
                                        } else {
                                              console.warn("Advertencia: El área limpia resultante no es una geometría válida para generar pasadas.");
@@ -1027,6 +1076,7 @@
 
                 let centroid = null;
                 try {
+                     // Calcular el centroide del área limpia para usar como pivote de rotación
                      centroid = turf.centroid(geometryForSweepAndPiP);
                      console.log("Centroide del área limpia para rotación:", JSON.stringify(centroid));
                 } catch(e) {
@@ -1036,101 +1086,275 @@
                 }
 
 
-                let rotationAngle = 0;
-                let sweepDirectionInRotatedSpace = 0;
+                let rotationAngle = 0; // Variable para almacenar el ángulo de rotación final
+                let sweepDirectionInRotatedSpace = 0; // 0 para N-S (pasadas O-E), 1 para E-W (pasadas N-S)
                 let heuristicDirectionDescription = "";
 
-                let longestSegmentAngle = 0;
-                let foundLongestSegment = false;
+                // --- Lógica para determinar el ángulo de rotación: Priorizar pendiente si MDT está disponible ---
+                 if (mdtImage && typeof GeoTIFF !== 'undefined') {
+                      console.log("MDT Image está disponible. Intentando calcular ángulo de rotación basado en pendiente...");
+                      // === AQUÍ VA LA LÓGICA PARA CALCULAR EL ÁNGULO DE LA PENDIENTE DOMINANTE ===
+                      // Esto implica:
+                      // 1. Muestrear elevaciones en varios puntos de la parcela limpia (ej: centroide y puntos cardinales cercanos).
+                      //    Para ello, necesitarás convertir las coordenadas Lat/Lng a las coordenadas del CRS del TIFF
+                      //    y luego a coordenadas de píxel para leer los valores del mdtImage.
+                      //    La librería `geotiff.js` ayuda con esto (ver `image.getPoint()` o `image.readRasters()`).
+                      // 2. Calcular la dirección de la pendiente (bearing) a partir de las elevaciones muestreadas.
+                      //    Esto requiere matemáticas para estimar el gradiente (dz/dx, dz/dy).
+                      // 3. Determinar el ángulo de rotación para las pasadas, que debe ser perpendicular a la dirección de la pendiente dominante.
+                      //    `rotationAngle = slopeBearing + 90;` o `slopeBearing - 90;`.
 
-                 if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
-                    const exteriorCoords = parcelGeometry.coordinates[0];
-                    if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
-                         let maxLength = 0;
-                         let p1Longest = null;
-                         let p2Longest = null;
+                      // === EJEMPLO CONCEPTUAL (REEMPLAZAR CON LA LÓGICA REAL) ===
+                       let slopeBearingFromMdt = null; // Placeholder: variable que DEBERÍAS calcular
 
-                         for (let i = 0; i < exteriorCoords.length - 1; i++) {
-                             const p1 = turf.point(exteriorCoords[i]);
-                             const p2 = turf.point(exteriorCoords[i+1]);
+                       // --- Inicio de ejemplo de cómo usar mdtImage para obtener elevación (solo 1 punto) ---
+                       if (centroid && centroid.geometry && centroid.geometry.coordinates) {
+                            const centroidCoordsWgs84 = centroid.geometry.coordinates; // [lng, lat]
+                            // Necesitarás convertir centroidCoordsWgs84 al CRS del TIFF si es diferente
+                            // Usando geotiff.js, puedes leer valores de píxel en una ventana geográfica:
+                            const image = mdtImage;
+                            // Define una ventana pequeña alrededor del centroide en coordenadas del CRS del TIFF
+                            // Asumiendo por ahora que el TIFF usa WGS84 (lo cual es común para Lat/Lng, pero no siempre para MDT)
+                            // Si el TIFF es proyectado (ej. UTM), necesitarás reproyectar centroidCoordsWgs84 primero.
+                            const sampleWindow = [
+                                centroidCoordsWgs84[0] - 0.00001, // xMin (Lng)
+                                centroidCoordsWgs84[1] - 0.00001, // yMin (Lat)
+                                centroidCoordsWgs84[0] + 0.00001, // xMax (Lng)
+                                centroidCoordsWgs84[1] + 0.00001  // yMax (Lat)
+                            ];
+                             // Ajusta el 0.00001 según la resolución de tu TIFF para muestrear ~1 píxel.
+
                              try {
-                                const length = turf.distance(p1, p2, {units: units});
-                                if (length > maxLength) {
-                                    maxLength = length;
-                                    p1Longest = p1;
-                                    p2Longest = p2;
+                                const rasters = await image.readRasters({ window: sampleWindow }); // Lee los valores de píxel en la ventana
+                                 if (rasters && rasters.length > 0 && rasters[0].length > 0) {
+                                     const elevationAtCentroid = rasters[0][0]; // Valor del primer píxel en la primera banda
+                                     console.log("Elevación muestreada en el centroide:", elevationAtCentroid);
+
+                                      // === AQUÍ IRÍA LA LÓGICA PARA MUESTREAR MÁS PUNTOS Y CALCULAR SLOPEBEARING ===
+                                      // Esta es la parte compleja que mencionamos. Necesitarías:
+                                      // - Muestrear elevación en N, S, E, O (usando turf.destination y leyendo MDT en esos puntos)
+                                      // - Calcular diferencias de elevación y distancias para estimar el vector de pendiente.
+                                      // - Determinar el bearing (ángulo) de ese vector de pendiente.
+                                      // slopeBearingFromMdt = calcularSlopeBearing(...); // Implementar esta función
+
+                                      // Si se logra calcular slopeBearingFromMdt:
+                                      // let slopeBasedRotation = slopeBearingFromMdt + 90; // O -90
+                                      // rotationAngle = (slopeBasedRotation % 360 + 360) % 360;
+                                      // heuristicDirectionDescription = `Pendiente dominante del MDT (ángulo calculado: ${slopeBearingFromMdt.toFixed(2)}°)`;
+                                       console.warn("Lógica de cálculo de pendiente aún no implementada. Usando lógica de fallback.");
+                                       slopeBearingFromMdt = null; // Asegura que fallback se use si no se implementa el cálculo
+
+                                 } else {
+                                     console.warn("No se pudieron leer valores de elevación del MDT en la ventana de muestreo.");
+                                      alert("Advertencia: No se pudo leer elevación del MDT en la parcela. Usando lógica de fallback.");
+                                     slopeBearingFromMdt = null; // Asegura que fallback se use
+                                 }
+                             } catch (e) {
+                                 console.error("Error al leer rasters del MDT:", e);
+                                  alert("Error al leer datos del MDT. Usando lógica de fallback.");
+                                 slopeBearingFromMdt = null; // Asegura que fallback se use
+                             }
+                       } else {
+                           console.warn("Centroide de la parcela no válido para muestreo de MDT.");
+                           slopeBearingFromMdt = null; // Asegura que fallback se use
+                       }
+                       // --- Fin de ejemplo de cómo usar mdtImage ---
+
+
+                      if (slopeBearingFromMdt !== null) {
+                           // Si se pudo calcular la pendiente desde el MDT, usar ese ángulo para la rotación
+                           let slopeBasedRotation = slopeBearingFromMdt + 90; // O -90; puedes necesitar lógica para elegir entre +90 y -90
+                           rotationAngle = (slopeBasedRotation % 360 + 360) % 360;
+                           sweepDirectionInRotatedSpace = 0; // Asumiendo pasadas horizontales en el espacio rotado por pendiente
+                           heuristicDirectionDescription = `Pendiente dominante del MDT (ángulo calculado: ${slopeBearingFromMdt.toFixed(2)}°)`;
+                           console.log(`Ángulo de rotación basado en pendiente calculado: ${rotationAngle.toFixed(2)}°`);
+
+                      } else {
+                          console.warn("No se pudo calcular el ángulo de pendiente del MDT. Usando lógica de fallback.");
+                          // Si no se pudo calcular la pendiente, usar la lógica de fallback existente
+                            let originalParcelBbox = null;
+                            let originalBboxWidthMeters = 0;
+                            let originalBboxHeightMeters = 0;
+                            let originalParcelArea = 0;
+                            let originalBboxArea = 0;
+                            let originalRectangularity = 0;
+
+                             try {
+                                  originalParcelBbox = turf.bbox(parcelGeometry);
+                                  originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
+                                  originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
+                                  originalParcelArea = turf.area(turf.feature(parcelGeometry));
+                                  originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
+                                  originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
+
+                                  console.log(`Dimensiones Bbox original (fallback): Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
+
+                             } catch(e) {
+                                  console.error("Error calculando Bbox o Rectangularidad de la parcela original (fallback):", e);
+                             }
+
+                            let longestSegmentAngle = 0;
+                            let foundLongestSegment = false;
+                             if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
+                                const exteriorCoords = parcelGeometry.coordinates[0];
+                                if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
+                                     let maxLength = 0;
+                                     let p1Longest = null;
+                                     let p2Longest = null;
+
+                                     for (let i = 0; i < exteriorCoords.length - 1; i++) {
+                                         const p1 = turf.point(exteriorCoords[i]);
+                                         const p2 = turf.point(exteriorCoords[i+1]);
+                                         try {
+                                            const length = turf.distance(p1, p2, {units: units});
+                                            if (length > maxLength) {
+                                                maxLength = length;
+                                                p1Longest = p1;
+                                                p2Longest = p2;
+                                            }
+                                         } catch(e) {
+                                            console.warn("Error calculando distancia para segmento en heurística (fallback):", p1, p2, e);
+                                         }
+
+                                     }
+
+                                     if (p1Longest && p2Longest) {
+                                         try {
+                                             longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
+                                             foundLongestSegment = true;
+                                             console.log(`Lado más largo de la parcela original encontrado (fallback). Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
+                                         } catch(e) {
+                                              console.warn("Error calculando bearing para lado más largo (fallback):", p1Longest, p2Longest, e);
+                                              foundLongestSegment = false;
+                                         }
+                                     } else {
+                                          console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo (fallback).");
+                                     }
+                                } else {
+                                    console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos (fallback).");
                                 }
-                             } catch(e) {
-                                console.warn("Error calculando distancia para segmento en heurística:", p1, p2, e);
+                             } else {
+                                  console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo (fallback).");
                              }
 
-                         }
+                            const useLongestSideThreshold = 0.7;
 
-                         if (p1Longest && p2Longest) {
-                             try {
-                                 longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
-                                 foundLongestSegment = true;
-                                 console.log(`Lado más largo de la parcela original encontrado. Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
-                             } catch(e) {
-                                  console.warn("Error calculando bearing para lado más largo:", p1Longest, p2Longest, e);
-                                  foundLongestSegment = false;
-                             }
-                         } else {
-                              console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo.");
-                         }
-                    } else {
-                        console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos.");
-                    }
+                            if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
+                                rotationAngle = -longestSegmentAngle;
+                                sweepDirectionInRotatedSpace = 0;
+                                heuristicDirectionDescription = `Lado más largo de la parcela original (fallback: ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
+                                 console.log("Heurística (fallback): Usando el lado más largo como dirección principal.");
+
+                            } else {
+                                console.log("Heurística (fallback): Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
+                                if (originalBboxWidthMeters >= originalBboxHeightMeters) {
+                                    rotationAngle = 0;
+                                    sweepDirectionInRotatedSpace = 0;
+                                    heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual) (fallback)";
+                                } else {
+                                    rotationAngle = 90;
+                                    sweepDirectionInRotatedSpace = 0;
+                                    heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales) (fallback)";
+                                     console.log("Bbox más alta que ancha (fallback), rotando 90 grados para pasadas horizontales en el espacio rotado.");
+                                }
+                            }
+                           console.log(`Ángulo de rotación basado en heurística (fallback): ${rotationAngle.toFixed(2)}°`);
+                      }
                  } else {
-                      console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo.");
+                      // Si el MDT Image no está disponible (no se cargó o procesó), usar la lógica de fallback existente
+                       console.warn("MDT Image no disponible. Usando lógica de fallback para determinar el ángulo de rotación.");
+                        let originalParcelBbox = null;
+                        let originalBboxWidthMeters = 0;
+                        let originalBboxHeightMeters = 0;
+                        let originalParcelArea = 0;
+                        let originalBboxArea = 0;
+                        let originalRectangularity = 0;
+
+                         try {
+                              originalParcelBbox = turf.bbox(parcelGeometry);
+                              originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
+                              originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
+                              originalParcelArea = turf.area(turf.feature(parcelGeometry));
+                              originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
+                              originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
+
+                              console.log(`Dimensiones Bbox original (fallback): Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
+
+                         } catch(e) {
+                              console.error("Error calculando Bbox o Rectangularidad de la parcela original (fallback):", e);
+                         }
+
+                        let longestSegmentAngle = 0;
+                        let foundLongestSegment = false;
+                         if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
+                            const exteriorCoords = parcelGeometry.coordinates[0];
+                            if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
+                                 let maxLength = 0;
+                                 let p1Longest = null;
+                                 let p2Longest = null;
+
+                                 for (let i = 0; i < exteriorCoords.length - 1; i++) {
+                                     const p1 = turf.point(exteriorCoords[i]);
+                                     const p2 = turf.point(exteriorCoords[i+1]);
+                                     try {
+                                        const length = turf.distance(p1, p2, {units: units});
+                                        if (length > maxLength) {
+                                            maxLength = length;
+                                            p1Longest = p1;
+                                            p2Longest = p2;
+                                        }
+                                     } catch(e) {
+                                        console.warn("Error calculando distancia para segmento en heurística (fallback):", p1, p2, e);
+                                     }
+
+                                 }
+
+                                 if (p1Longest && p2Longest) {
+                                     try {
+                                         longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
+                                         foundLongestSegment = true;
+                                         console.log(`Lado más largo de la parcela original encontrado (fallback). Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
+                                     } catch(e) {
+                                          console.warn("Error calculando bearing para lado más largo (fallback):", p1Longest, p2Longest, e);
+                                          foundLongestSegment = false;
+                                     }
+                                 } else {
+                                      console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo (fallback).");
+                                 }
+                            } else {
+                                console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos (fallback).");
+                            }
+                         } else {
+                              console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo (fallback).");
+                         }
+
+                        const useLongestSideThreshold = 0.7;
+
+                        if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
+                            rotationAngle = -longestSegmentAngle;
+                            sweepDirectionInRotatedSpace = 0;
+                            heuristicDirectionDescription = `Lado más largo de la parcela original (fallback: ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
+                             console.log("Heurística (fallback): Usando el lado más largo como dirección principal.");
+
+                        } else {
+                            console.log("Heurística (fallback): Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
+                            if (originalBboxWidthMeters >= originalBboxHeightMeters) {
+                                rotationAngle = 0;
+                                sweepDirectionInRotatedSpace = 0;
+                                heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual) (fallback)";
+                            } else {
+                                rotationAngle = 90;
+                                sweepDirectionInRotatedSpace = 0;
+                                heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales) (fallback)";
+                                 console.log("Bbox más alta que ancha (fallback), rotando 90 grados para pasadas horizontales en el espacio rotado.");
+                            }
+                        }
+                        console.log(`Ángulo de rotación basado en heurística (fallback): ${rotationAngle.toFixed(2)}°`);
                  }
-
-                const useLongestSideThreshold = 0.7;
-                let originalParcelBbox = null;
-                let originalBboxWidthMeters = 0;
-                let originalBboxHeightMeters = 0;
-                let originalParcelArea = 0;
-                let originalBboxArea = 0;
-                let originalRectangularity = 0;
-
-                 try {
-                      originalParcelBbox = turf.bbox(parcelGeometry);
-                      originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                      originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
-                      originalParcelArea = turf.area(turf.feature(parcelGeometry));
-                      originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
-                      originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
-
-                      console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
-
-                 } catch(e) {
-                      console.error("Error calculando Bbox o Rectangularidad de la parcela original:", e);
-                 }
+                // --- Fin Lógica para determinar el ángulo de rotación ---
 
 
-
-                if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
-                    rotationAngle = -longestSegmentAngle;
-                    sweepDirectionInRotatedSpace = 0;
-                    heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
-                     console.log("Heurística: Usando el lado más largo como dirección principal.");
-
-                } else {
-                    console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
-                    if (originalBboxWidthMeters >= originalBboxHeightMeters) {
-                        rotationAngle = 0;
-                        sweepDirectionInRotatedSpace = 0;
-                        heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
-                    } else {
-                        rotationAngle = 90;
-                        sweepDirectionInRotatedSpace = 0;
-                        heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)"; // Log ajustado
-                         console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
-                    }
-                }
-
-
-                console.log(`Dirección heurística elegida: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
+                console.log(`Dirección elegida para el barrido: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
                 console.log(`El barrido en el espacio rotado será ${sweepDirectionInRotatedSpace === 0 ? 'N-S (para pasadas horizontales)' : 'E-W (para pasadas verticales)'}.`);
 
                  if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
@@ -1178,7 +1402,7 @@
                     rotatedEndSweepCoordValue = rotatedBboxNorth;
                     rotatedSweepLineStartCoord = rotatedBboxWest;
                     rotatedSweepLineEndCoord = rotatedBboxEast;
-                    rotatedSweepLineDirection = 90;
+                    rotatedSweepLineDirection = 90; // Dirección de la línea de barrido en el espacio rotado (Este)
 
                      console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
                 } else {
@@ -1186,7 +1410,7 @@
                     rotatedEndSweepCoordValue = rotatedBboxEast;
                      rotatedSweepLineStartCoord = rotatedBboxSouth;
                      rotatedSweepLineEndCoord = rotatedBboxNorth;
-                     rotatedSweepLineDirection = 0;
+                     rotatedSweepLineDirection = 0; // Dirección de la línea de barrido en el espacio rotado (Norte)
 
                      console.log("Configurando barrido O->E en espacio rotado para generar pasadas verticales (S->N).");
                 }
@@ -1194,6 +1418,7 @@
                 let totalSweepExtentMeters = 0;
                 let passLengthMeters = 0;
                  try {
+                     // Extensión total perpendicular a la dirección de barrido
                      totalSweepExtentMeters = turf.distance(
                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxNorth] : [rotatedBboxEast, rotatedBboxSouth]),
@@ -1201,6 +1426,7 @@
                      );
                      console.log(`Extensión total del barrido en espacio rotado (a lo largo de la Bbox perpendicular a las pasadas): ${totalSweepExtentMeters.toFixed(2)} ${units}`);
 
+                     // Longitud máxima de una posible pasada (a lo largo de la dirección de barrido)
                      passLengthMeters = turf.distance(
                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxEast, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxNorth]),
@@ -1216,8 +1442,8 @@
 
 
                let rotatedCurrentOffset = workingWidth / 2;
-               const samplingDistance = 1;
-               const geometryForPiPCheck = rotatedGeometryForSweepAndPiP;
+               const samplingDistance = 1; // Distancia de muestreo a lo largo de la línea de pasada
+               const geometryForPiPCheck = rotatedGeometryForSweepAndPiP; // Geometría limpia y rotada para el Point in Polygon
 
                console.log(`Generando pasadas de ${workingWidth}m en espacio rotado (muestreo de ${samplingDistance}m).`);
 
@@ -1229,15 +1455,17 @@
                    alert("Ancho de trabajo inválido o área a barrer muy pequeña.");
                    return;
                } else {
-                    const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
-                    while (rotatedCurrentOffset <= sweepLimit ) {
+                    const sweepLimit = totalSweepExtentMeters - (workingWidth / 2); // Detener el barrido antes del borde
+                    while (rotatedCurrentOffset <= totalSweepExtentMeters + (workingWidth / 2)) { // Ajustar límite para cubrir toda el área
 
+                       // Calcular un punto en el eje perpendicular al barrido (donde se centra la pasada actual)
                        let pointOnSweepAxis = null;
                         try {
                             pointOnSweepAxis = turf.destination(
+                                // Punto de inicio del barrido en la Bbox rotada (ej. Suroeste si barrido S->N)
                                 turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                                rotatedCurrentOffset / 1000,
-                                sweepDirectionInRotatedSpace,
+                                rotatedCurrentOffset / 1000, // Distancia en km para turf.destination
+                                sweepDirectionInRotatedSpace, // Dirección del barrido (0 para N, 90 para E, etc.)
                                 {units: 'kilometers'}
                             );
                         } catch(e) {
@@ -1247,21 +1475,24 @@
                         }
 
                         if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
-                             console.warn("turf.destination devolvió un punto inválido. Saltando esta pasada.");
+                             console.warn("turf.destination devolvió un punto inválido en el eje de barrido. Saltando esta pasada.");
                              rotatedCurrentOffset += workingWidth;
                              continue;
                         }
 
+                       // La coordenada relevante para la línea de pasada actual (Lat si barrido S->N, Lng si barrido O->E)
+                       let passCenterCoordValue = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
 
-                       let passCenterCoord = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
 
-
+                       // Crear una línea de barrido que cubra todo el ancho de la Bbox rotada en la coordenada de pasada actual
                        let fullSweepLineInRotatedSpace = null;
                         try {
                            if (sweepDirectionInRotatedSpace === 0) {
-                                fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
+                                // Línea horizontal (Oeste a Este)
+                                fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoordValue], [rotatedBboxEast, passCenterCoordValue]]);
                            } else {
-                                fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
+                                // Línea vertical (Sur a Norte)
+                                fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoordValue, rotatedBboxSouth], [passCenterCoordValue, rotatedBboxNorth]]);
                            }
                         } catch(e) {
                              console.error("Error en turf.lineString al crear línea de barrido completa:", e);
@@ -1288,9 +1519,11 @@
 
                        let currentSegmentPoints = [];
 
+                       // Muestrear puntos a lo largo de la línea de barrido completa
                        for (let i = 0; i <= lineLength; i += samplingDistance) {
                            let point = null;
                            try {
+                               // Obtener el punto en la línea de barrido a la distancia 'i'
                                point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
                            } catch(e) {
                                console.warn("Error en turf.along al muestrear punto.", i, e);
@@ -1302,7 +1535,7 @@
                                 continue;
                            }
 
-
+                           // Verificar si el punto está dentro de la geometría limpia y rotada
                            let isInside = false;
                            if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
                                try {
@@ -1318,19 +1551,24 @@
 
 
                            if (isInside && point && point.geometry && point.geometry.coordinates) {
+                               // Si el punto está dentro, añadir sus coordenadas al segmento actual
                                currentSegmentPoints.push(point.geometry.coordinates);
                            } else {
+                               // Si el punto está fuera, el segmento actual ha terminado
                                if (currentSegmentPoints.length > 1) {
+                                    // Si el segmento tiene al menos 2 puntos, es una línea válida
                                     try {
                                         generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                                     } catch(e) {
                                         console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
                                     }
                                }
+                               // Reiniciar el segmento de puntos
                                currentSegmentPoints = [];
                            }
                        }
 
+                       // Al final de la línea de barrido, añadir el último segmento si existe
                        if (currentSegmentPoints.length > 1) {
                             try {
                                 generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
@@ -1339,6 +1577,7 @@
                            }
                        }
 
+                       // Mover al siguiente offset para la próxima pasada
                        rotatedCurrentOffset += workingWidth;
                    }
                }
@@ -1350,6 +1589,7 @@
                generatedRotatedPasses.forEach((rotatedPass, index) => {
                    try {
                         if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
+                             // Usar el mismo centroide de rotación que se usó para rotar la geometría de la parcela
                              if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
                                  console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
                                  return;
@@ -1367,7 +1607,7 @@
                    }
                });
 
-               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
+               console.log("Generación de pasadas finalizada.");
                 console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
@@ -1392,27 +1632,27 @@
             // Comprobar si el navegador soporta la API de Geolocation
             if (!navigator.geolocation) {
                 console.log("Tu navegador no soporta geolocalización.");
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Geolocalización no soportada')) {
                       loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
                  }
-                alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria para mostrar tu posición.");
+                // alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria para mostrar tu posición."); // Evitar alert aquí, se maneja en el load o en el botón
                 return;
             }
 
             // Si ya estamos observando, no iniciar otro watchPosition
             if (watchingLocation) {
                  console.log("watchPosition ya está activo.");
-                 // Si ya tenemos una localización, centrar el mapa
+                 // Si ya tenemos una localización, centrar el mapa al hacer clic en el botón
                  if (lastKnownLocation) {
-                      map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                      map.setView(lastKnownLocation, Math.max(map.getZoom(), map.getZoom() < 16 ? 16 : map.getZoom())); // Centra y ajusta zoom a al menos 16
                       console.log("Centrando mapa en la última localización conocida.");
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                          loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
+                            loadingStatusDiv.textContent = 'Datos cargados. Mapa centrado en tu posición.';
                        }
                  } else {
                      console.log("watchPosition activo, pero aún sin localización. Esperando...");
-                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                           loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                      if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización')) {
+                           loadingStatusDiv.textContent += ' Buscando localización...';
                       }
                  }
                  return;
@@ -1426,9 +1666,10 @@
                 maximumAge: 0             // No usar una posición cacheada, siempre intentar obtener una nueva
             });
 
-            if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                loadingStatusDiv.textContent = 'Cargando datos geoespaciales y buscando localización...';
-            }
+             if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización')) {
+                 loadingStatusDiv.textContent += ' y buscando localización...';
+             }
+
 
         }
 
@@ -1453,7 +1694,8 @@
                 radius: 8,
                 color: '#0055FF',
                 fillColor: '#0055FF',
-                fillOpacity: 1
+                fillOpacity: 1,
+                className: 'location-marker' // Añadir una clase para identificarlo si es necesario
             }).addTo(map);
 
             // Añadir un círculo para mostrar la precisión
@@ -1476,9 +1718,11 @@
             }
 
 
-             // Actualizar el estado de carga
+             // Actualizar el estado de carga (manteniendo mensajes de error/advertencia si existen)
              if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                  loadingStatusDiv.textContent = 'Datos cargados. Localización encontrada.';
+             } else if (loadingStatusDiv.textContent.includes('Buscando localización')) {
+                 loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', 'Localización encontrada.');
              }
 
 
@@ -1487,31 +1731,40 @@
         function onLocationError(e) {
             console.error(`Error de localización (${e.code}): ${e.message}`);
             watchingLocation = false; // watchPosition dejó de funcionar o no se pudo iniciar
+            lastKnownLocation = null; // Limpiar la última posición conocida
 
-            let errorMessage = "Error al obtener la localización: ";
+            let errorMessageText = "";
 
             switch (e.code) {
                 case 1:
-                    errorMessage += "Permiso denegado. Para mostrar tu posición, permite el acceso a la geolocalización.";
-                    alert("Para mostrar tu posición, por favor permite el acceso a la geolocalización en la configuración de tu navegador.");
+                    errorMessageText = "Permiso denegado. Permite el acceso a la geolocalización.";
+                    // El alert ya se muestra en la primera llamada a locateUser si falla por permiso
                     break;
                 case 2:
-                    errorMessage += "Posición no disponible. Asegúrate de tener buena señal GPS.";
+                    errorMessageText = "Posición no disponible. Asegúrate de tener buena señal GPS.";
                      alert("Tu posición no está disponible (señal GPS débil o desactivado).");
                     break;
                 case 3:
-                    errorMessage += "Tiempo de espera agotado.";
+                    errorMessageText = "Tiempo de espera agotado al buscar localización.";
                      alert("Tiempo de espera agotado al buscar tu localización. Asegúrate de tener buena señal GPS.");
                     break;
                 default:
-                    errorMessage += `Error desconocido: ${e.message}`;
-                     alert(errorMessage + " Revisa la consola para más detalles.");
+                    errorMessageText = `Error desconocido al obtener la localización: ${e.message}`;
+                     alert(errorMessageText + " Revisa la consola para más detalles.");
                     break;
             }
              // Solo actualiza el estado si no hay un error de carga de datos fatal
              if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                  loadingStatusDiv.textContent = 'Datos cargados. ' + errorMessage;
+                  // Reemplazar solo la parte de localización si está presente
+                  if (loadingStatusDiv.textContent.includes('Buscando localización')) {
+                      loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', `Error de localización: ${errorMessageText}`);
+                  } else if (loadingStatusDiv.textContent.includes('Localización encontrada')) {
+                       loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Localización encontrada.', `Error de localización: ${errorMessageText}`);
+                  } else {
+                      loadingStatusDiv.textContent += ` Error de localización: ${errorMessageText}`;
+                  }
              }
+
 
              // Eliminar el marcador y círculo si hubo un error
              if (locationMarker) {
@@ -1522,7 +1775,7 @@
                 map.removeLayer(accuracyCircle);
                 accuracyCircle = null;
              }
-             lastKnownLocation = null; // Limpiar la última posición conocida
+
         }
         // --- Fin Lógica de Localización GPS ---
 
@@ -1531,18 +1784,25 @@
             console.log("Botón de localización pulsado.");
             if (lastKnownLocation) {
                  // Si ya tenemos una localización, simplemente centramos el mapa en ella
-                 map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
+                 map.setView(lastKnownLocation, Math.max(map.getZoom(), map.getZoom() < 16 ? 16 : map.getZoom())); // Centra y ajusta zoom a al menos 16
                  console.log("Centrando mapa en la última localización conocida al pulsar el botón.");
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                        loadingStatusDiv.textContent = 'Datos cargados. Mapa centrado en tu posición.';
+                 } else if (loadingStatusDiv.textContent.includes('Localización encontrada') || loadingStatusDiv.textContent.includes('Error de localización')) {
+                      // Actualiza el mensaje de estado para reflejar que se centró en la última posición
+                       loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Localización encontrada.', 'Mapa centrado en tu posición.');
+                        loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace(/Error de localización:.*/, 'Mapa centrado en tu última posición conocida.');
+
                  }
+
 
             } else {
                  // Si no tenemos una localización o watchPosition no está activo, intentar iniciar/reiniciar
                  console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
-                 locateUser(); // Llamar a la función que inicia watchPosition
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                       loadingStatusDiv.textContent = 'Datos cargados. Buscando localización...';
+                 // Llamar a locateUser() intentará iniciar watchPosition si no está activo
+                 locateUser();
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización')) {
+                       loadingStatusDiv.textContent += ' Buscando localización...';
                  }
             }
         });
