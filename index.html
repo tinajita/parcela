@@ -146,16 +146,7 @@
              console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
         }
         // Eliminamos las verificaciones de GeoTIFF por ahora
-        /*
-         console.log("Estado de 'GeoTIFF' inmediatamente después del script tag:", typeof GeoTIFF);
-        if (typeof GeoTIFF === 'undefined') {
-             console.error("VERIFICACIÓN: 'GeoTIFF' es undefined justo después del script tag. El script de GeoTIFF.js NO se cargó o ejecutó como se esperaba.");
-        } else {
-             console.log("VERIFICACIÓN: 'GeoTIFF' parece estar definido. Tipo:", typeof GeoTIFF);
-        }
-        */
-        // Si necesitas proj4js, descomenta la línea y verifica su estado similarmente.
-        // console.log("Estado de 'proj4' inmediatamente después del script tag:", typeof proj4);
+
     </script>
 
 
@@ -179,7 +170,6 @@
         let curvasNivelLayer = null; // Variable para la capa de curvas de nivel para visualización
 
         // Eliminamos la variable mdtImage
-        // let mdtImage = null;
 
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
@@ -309,7 +299,6 @@
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
             // Eliminamos la URL del MDT
-            // const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif';
              // *** FIN URLs ***
 
              const units = 'meters'; // Unidades para Turf.js (buffer)
@@ -562,7 +551,6 @@
             const selectedParcelGeoJSON = selectedLayer.toGeoJSON();
             let parcelGeometry = selectedParcelGeoJSON.geometry; // Geometría de la parcela seleccionada
             const parcelFeature = turf.feature(parcelGeometry); // La parcela como feature para intersecciones
-            // Eliminamos parcelBbox aquí, ya que se calculará dentro del bucle de exclusión para cada feature por separado
 
 
             generatedPassesLayer.clearLayers(); // Limpiar pasadas anteriores
@@ -878,7 +866,7 @@
                                             if (validGeomsInGC.length > 0) {
                                                  let consolidatedCleanArea = null;
                                                   if (validGeomsInGC.length === 1) {
-                                                       consolidatedCleanArea = validGeomsInGC[0];
+                                                       consolidatedCleanArea = validGeomsInCleanedArea[0];
                                                        console.log("GeometryCollection de área limpia consolidado es 1 polígono. Usando directamente.");
                                                   } else {
                                                        try {
