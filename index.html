@@ -193,7 +193,7 @@
          });
 
         // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgconline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+         const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
              attribution: 'Esri, Garmin, FAO, NOAA, USGS',
              maxZoom: 17,
              transparent: true
@@ -249,17 +249,16 @@
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
             // --- Iniciar localización GPS (independiente de la carga de datos geoespaciales) ---
-             // Solo iniciamos watchPosition una vez al cargar si el navegador lo soporta
              if (navigator.geolocation) {
                  if (!watchingLocation) {
                      console.log("Iniciando observación de localización GPS...");
-                     watchingLocation = true; // Marca que watchPosition está activo
+                     watchingLocation = true;
                      navigator.geolocation.watchPosition(onLocationFound, onLocationError, {
                          enableHighAccuracy: true,
                          timeout: 10000,
                          maximumAge: 0
                      });
-                     loadingStatusDiv.textContent += ' y buscando localización...'; // Añadir estado de localización
+                     loadingStatusDiv.textContent += ' y buscando localización...';
 
                  } else {
                      console.log("watchPosition ya está activo.");
@@ -282,7 +281,7 @@
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
             const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - Corregida para CORS
-             // *** FIN URLs ***
+             // *** FIN URLs --- URLs de exclusión se usarán en el click del botón ***
 
             // Cargar solo Parcelas, Curvas de Nivel y MDT inicialmente
             Promise.all([
@@ -314,14 +313,26 @@
 
                              layer.on({
                                  click: e => {
+                                     // Deseleccionar capa anterior si existe
                                      if (selectedLayer) {
                                          selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
                                      }
+                                     // Aplicar estilo de selección a la capa actual
                                      layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
+                                     // Actualizar la parcela seleccionada
                                      selectedLayer = layer;
-                                     generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
+
+                                     // Habilitar el botón de generar pasadas
+                                     generarPasadasBtn.disabled = false;
+
                                      console.log("Parcela seleccionada:", feature.properties);
 
+                                     // *** LÍNEA ELIMINADA O COMENTADA PARA QUITAR EL POPUP ***
+                                     // layer.bindPopup(JSON.stringify(feature.properties));
+
+                                     // Esto es importante para evitar que el clic en la feature
+                                     // se propague al mapa y desencadene eventos de mapa (como el doble clic zoom si se hiciera rápido)
+                                     // aunque quitar el popup ya ayuda a que el doble click funcione.
                                      L.DomEvent.stopPropagation(e);
                                  }
                              });
@@ -347,6 +358,7 @@
                                 };
                            },
                            onEachFeature: function(feature, layer) {
+                                // Opcional: mantener popup para curvas de nivel si se desea
                                 if (feature.properties) {
                                     let elevation = null;
                                     if (feature.properties.hasOwnProperty('ELEVACION')) {
@@ -375,7 +387,7 @@
                        console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán curvas de nivel.", curvasNivelGeojsonData);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
@@ -384,8 +396,20 @@
 
                 // --- Código para manejar la carga del MDT (TIFF) ---
                  console.log("Intento de carga de MDT (TIFF) completado.");
+                 // Note: Loading TIFF data and making it visible might require a specific Leaflet plugin (like leaflet-geotiff).
+                 // The current code only fetches the TIFF file. Displaying it requires additional steps.
                  if (mdtTiffResponse && mdtTiffResponse.ok) {
                       console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
+                      // *** ADD LOGIC HERE TO DISPLAY THE TIFF IF USING A PLUGIN ***
+                      // Example (requires leaflet-geotiff plugin):
+                      /*
+                      mdtTiffResponse.arrayBuffer().then(arrayBuffer => {
+                           const geoTiff = L.geoTIFF(arrayBuffer).addTo(map);
+                           overlayLayers["MDT"] = geoTiff;
+                           updateLayersControl(); // Update layers control after adding MDT
+                           console.log("MDT TIFF added to map and layers control.");
+                      }).catch(e => console.error("Error processing or adding MDT TIFF:", e));
+                      */
                  } else {
                       console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
@@ -489,16 +513,22 @@
 
                            construccionesLayer = L.geoJSON(construccionesGeojsonData, {
                                style: feature => ({ color: '#FF0000', weight: 2, fillColor: '#FF0000', fillOpacity: 0.5 }),
-                                onEachFeature: (feature, layer) => {
-                                   if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
-                                      const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                       window.exclusionFeatures.push(clonedFeature);
-                                  } else {
-                                       console.warn("Geometría de construcción no es Polígono/MultiPolígono. No se usará para recorte:", feature.geometry);
-                                  }
+                               onEachFeature: (feature, layer) => {
+                                    // No hay popup para esta capa
                                }
                            }).addTo(map);
                            overlayLayers["Construcciones"] = construccionesLayer; // Añadir al control de capas
+                           // Recopilar geometrías de exclusión (solo polígonos/multipolígonos)
+                           if (construccionesGeojsonData.features) {
+                                construccionesGeojsonData.features.forEach(feature => {
+                                     if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+                                        const clonedFeature = JSON.parse(JSON.stringify(feature));
+                                         window.exclusionFeatures.push(clonedFeature);
+                                    } else {
+                                         console.warn("Geometría de construcción no es Polígono/MultiPolígono. No se usará para recorte:", feature.geometry);
+                                    }
+                                });
+                           }
                            console.log(`Construcciones cargadas en Leaflet. Número de features: ${construccionesGeojsonData.features.length}.`);
                       } else {
                           console.warn("Datos de Construcciones no son un FeatureCollection válido o están vacíos. No se cargarán construcciones.", construccionesGeojsonData);
@@ -521,33 +551,39 @@
                                      return { color: '#888888', weight: 1, opacity: 0.5 };
                                 },
                                onEachFeature: (feature, layer) => {
-                                   if (feature.geometry) {
-                                       if (feature.geometry.type === 'LineString') {
-                                           try {
-                                               const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
-                                                if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
-                                                     const bufferedFeature = JSON.parse(JSON.stringify(buffered));
-                                                     window.exclusionFeatures.push(bufferedFeature);
-                                                      console.log(`LineString de Elementos Internos bufferizado a ${buffered.geometry.type} y añadido como exclusión.`);
-                                                } else {
-                                                    console.warn("El buffer de LineString de Elementos Internos no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión. No se usará para recorte:", buffered);
-                                                }
-                                           } catch (e) {
-                                                console.error("Error al crear buffer para LineString de Elementos Internos:", feature, e);
-                                                console.warn("Error al crear buffer para LineString de Elemento Interno. No se usará para recorte.");
-                                           }
-
-                                       } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
-                                           const clonedFeature = JSON.parse(JSON.stringify(feature));
-                                           window.exclusionFeatures.push(clonedFeature);
-                                            console.log(`Polygon/MultiPolygon de Elementos Internos añadido como exclusión.`);
-                                       } else {
-                                            console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) no es LineString, Polígono o MultiPolígono. No se usará para recorte:`, feature.geometry);
-                                       }
-                                   }
+                                   // No hay popup para esta capa
                                }
                            }).addTo(map);
                            overlayLayers["Viales y Arroyos"] = elementosInternosLayer;
+                            // Recopilar geometrías de exclusión (con buffer si son líneas)
+                            if (elementosInternosGeojsonData.features) {
+                                elementosInternosGeojsonData.features.forEach(feature => {
+                                     if (feature.geometry) {
+                                         if (feature.geometry.type === 'LineString') {
+                                             try {
+                                                 const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
+                                                  if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
+                                                       const bufferedFeature = JSON.parse(JSON.stringify(buffered));
+                                                       window.exclusionFeatures.push(bufferedFeature);
+                                                        console.log(`LineString de Elementos Internos bufferizado a ${buffered.geometry.type} y añadido como exclusión.`);
+                                                  } else {
+                                                      console.warn("El buffer de LineString de Elementos Internos no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión. No se usará para recorte:", buffered);
+                                                  }
+                                             } catch (e) {
+                                                  console.error("Error al crear buffer para LineString de Elementos Internos:", feature, e);
+                                                  console.warn("Error al crear buffer para LineString de Elemento Interno. No se usará para recorte.");
+                                             }
+
+                                         } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                                             const clonedFeature = JSON.parse(JSON.stringify(feature));
+                                             window.exclusionFeatures.push(clonedFeature);
+                                              console.log(`Polygon/MultiPolygon de Elementos Internos añadido como exclusión.`);
+                                         } else {
+                                              console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) no es LineString, Polígono o MultiPolígono. No se usará para recorte:`, feature.geometry);
+                                         }
+                                     }
+                                 });
+                            }
                            console.log(`Elementos Internos cargados en Leaflet. Número de features: ${elementosInternosGeojsonData.features.length}.`);
                        } else {
                            console.warn("Datos de Elementos Internos no son un FeatureCollection válido o están vacíos. No se cargarán elementos internos.", elementosInternosGeojsonData);
@@ -565,9 +601,9 @@
                      console.error("Error durante la carga de datos de exclusión:", error);
                      loadingStatusDiv.textContent = `Error al cargar datos de exclusión: ${error.message}`;
                      alert(`Ocurrió un error al cargar los archivos de exclusión. No se generarán pasadas con exclusiones. Revisa la consola para más detalles. Error: ${error.message}`);
-                     // Continuar con la generación de pasadas pero sin datos de exclusión
                      window.exclusionFeatures = []; // Asegurar que esté vacío si hubo error
                      exclusionLayersLoaded = true; // Marcar como cargado para no intentar de nuevo
+                     updateLayersControl(); // Actualizar control de capas (aunque no se hayan cargado)
                      generatePassesLogic(); // Intentar generar pasadas sin exclusiones
 
                  });
@@ -626,7 +662,7 @@
                           }
                        });
                   } else {
-                      console.log("No se cargaron features de exclusión globalmente (window.exclusionFeatures está vacío) o hubo errores en la carga.");
+                      console.log("No hay features de exclusión globalmente cargadas o hubo errores en la carga. No se aplicarán exclusiones.");
                   }
                  console.log(`Features de exclusión que intersectan con la parcela: ${intersectingExclusionFeatures.length}`);
 
@@ -897,7 +933,7 @@
                              console.error("Error durante el cálculo de diferencia de geometrías:", e);
                              console.warn("Ocurrió un error al excluir zonas a evitar. Usando geometría original de la parcela.");
                              geometryForCalculations = parcelGeometry;
-                             alert("Advertencia: Ocurrió un error al excluir zonas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
+                             alert("Advertencia: Ocurrió un error al calcular la unión de áreas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
                         }
                   } else {
                       console.log("No se pudo calcular un área limpia válida (probablemente no hay exclusiones válidas o hubo un error en el procesamiento de la unión). Usando geometría original de la parcela.");
@@ -1264,15 +1300,26 @@
                      generarPasadasBtn.disabled = false;
                     return;
                 } else {
-                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
+                     // Adjust the sweep limit slightly to ensure the last pass is included if it aligns perfectly
+                     const sweepLimit = totalSweepExtentMeters + (workingWidth * 0.1); // Extend sweep slightly beyond max extent
+
+
+                     // Ensure at least one pass if area > 0
+                     if (totalSweepExtentMeters < workingWidth / 2 && turf.area(geometryForSweepAndPiP) > 0) {
+                         console.warn("Extensión del barrido menor que la mitad del ancho de trabajo, pero área limpia > 0. Generando una única pasada central.");
+                         rotatedCurrentOffset = totalSweepExtentMeters / 2; // Place a single pass in the middle
+                     }
+
+
                      while (rotatedCurrentOffset <= sweepLimit ) {
 
                         let pointOnSweepAxis = null;
                          try {
+                             // Calculate a point along the sweep axis
                              pointOnSweepAxis = turf.destination(
                                  turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                                 rotatedCurrentOffset / 1000,
-                                 sweepDirectionInRotatedSpace,
+                                 rotatedCurrentOffset / 1000, // Turf.js distance is in km by default for destination if no units
+                                 sweepDirectionInRotatedSpace, // 0 for North, 90 for East
                                  {units: 'kilometers'}
                              );
                          } catch(e) {
@@ -1293,10 +1340,10 @@
 
                         let fullSweepLineInRotatedSpace = null;
                          try {
-                            if (sweepDirectionInRotatedSpace === 0) {
-                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
-                            } else {
-                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
+                            if (sweepDirectionInRotatedSpace === 0) { // Horizontal passes (East-West in original space)
+                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest - workingWidth, passCenterCoord], [rotatedBboxEast + workingWidth, passCenterCoord]]); // Extend line slightly beyond bbox
+                            } else { // Vertical passes (North-South in original space)
+                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth - workingWidth], [passCenterCoord, rotatedBboxNorth + workingWidth]]); // Extend line slightly beyond bbox
                             }
                          } catch(e) {
                               console.error("Error en turf.lineString al crear línea de barrido completa:", e);
@@ -1323,12 +1370,13 @@
 
                         let currentSegmentPoints = [];
 
+                        // Sample points along the extended sweep line
                         for (let i = 0; i <= lineLength; i += samplingDistance) {
                             let point = null;
                             try {
                                 point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
                             } catch(e) {
-                                console.warn("Error en turf.along al muestrear punto.", i, e);
+                                console.warn(`Error en turf.along al muestrear punto a distancia ${i}. Saltando punto.`, e);
                                 continue;
                             }
 
@@ -1341,7 +1389,7 @@
                             let isInside = false;
                             if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
                                 try {
-                                    isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
+                                    isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck, {ignoreBoundary: true}); // Use ignoreBoundary for cleaner segments
                                 } catch(e) {
                                     console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
                                     isInside = false;
@@ -1355,6 +1403,7 @@
                             if (isInside && point && point.geometry && point.geometry.coordinates) {
                                 currentSegmentPoints.push(point.geometry.coordinates);
                             } else {
+                                // If not inside, check if we have a valid segment to push
                                 if (currentSegmentPoints.length > 1) {
                                      try {
                                          generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
@@ -1362,10 +1411,11 @@
                                          console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
                                      }
                                 }
-                                currentSegmentPoints = [];
+                                currentSegmentPoints = []; // Reset points for the next segment
                             }
                         }
 
+                        // Add the last segment if any points were collected
                         if (currentSegmentPoints.length > 1) {
                              try {
                                  generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
@@ -1382,13 +1432,16 @@
                 console.log(`Generadas ${generatedRotatedPasses.length} pasadas (segmentos de LineString) en el espacio rotado.`);
 
                 console.log(`Rotando pasadas de vuelta por ${-rotationAngle.toFixed(2)} grados.`);
+                 if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
+                       console.error("Centroide no válido al rotar las pasadas. No se podrán rotar de vuelta correctamente.");
+                       alert("Error al rotar las pasadas de vuelta. No se mostrarán correctamente.");
+                        loadingStatusDiv.textContent = 'Error al rotar pasadas.';
+                        generarPasadasBtn.disabled = false;
+                       return;
+                 }
                 generatedRotatedPasses.forEach((rotatedPass, index) => {
                     try {
                          if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
-                              if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                                  console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
-                                  return;
-                              }
                               const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
                               L.geoJSON(originalPassGeometry, {
                                   style: { color: '#800080', weight: 2 }
@@ -1399,6 +1452,7 @@
 
                     } catch (e) {
                         console.warn(`Error al rotar una pasada de vuelta (#${index}):`, rotatedPass, e);
+                         console.log(`Pasada rotada problemática (JSON):`, JSON.stringify(rotatedPass));
                     }
                 });
 
@@ -1441,14 +1495,17 @@
             if (watchingLocation) {
                  console.log("watchPosition ya está activo.");
                  if (lastKnownLocation) {
+                      // Si ya tenemos una localización, simplemente centramos el mapa en ella
                       map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
                       console.log("Centrando mapa en la última localización conocida.");
-                       if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Buscando localización...')) {
                           loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada.';
+                       } else if (loadingStatusDiv.textContent.includes('Buscando localización...')) {
+                           loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', 'Localización encontrada.');
                        }
                  } else {
                      console.log("watchPosition activo, pero aún sin localización. Esperando...");
-                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                      if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Localización encontrada.')) {
                            loadingStatusDiv.textContent = 'Datos iniciales cargados. Buscando localización...';
                       }
                  }
@@ -1463,9 +1520,14 @@
                 maximumAge: 0
             });
 
-            if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                loadingStatusDiv.textContent = 'Cargando datos iniciales y buscando localización...';
-            }
+             if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Buscando localización...')) {
+                 loadingStatusDiv.textContent += ' y buscando localización...';
+             } else if (!loadingStatusDiv.textContent.startsWith('Error:') && loadingStatusDiv.textContent.includes('Localización encontrada.')) {
+                 // Do nothing, status is already fine
+             } else if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                  loadingStatusDiv.textContent = 'Cargando datos iniciales y buscando localización...'; // Fallback status
+             }
+
 
         }
 
@@ -1506,13 +1568,15 @@
             }
 
 
+             // Update loading status text carefully
              if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
-                 if (selectedLayer) {
-                     loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Parcela seleccionada.';
-                 } else {
-                      loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una parcela.';
+                 let baseText = loadingStatusDiv.textContent;
+                 if (baseText.includes('Buscando localización...')) {
+                     baseText = baseText.replace('Buscando localización...', 'Localización encontrada.');
+                 } else if (!baseText.includes('Localización encontrada.')) {
+                      baseText += ' Localización encontrada.';
                  }
-
+                 loadingStatusDiv.textContent = baseText;
              }
 
 
@@ -1542,9 +1606,20 @@
                      alert(errorMessage + " Revisa la consola para más detalles.");
                     break;
             }
+             // Update loading status text carefully
              if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                  loadingStatusDiv.textContent = 'Datos iniciales cargados. ' + errorMessage;
+                 let baseText = loadingStatusDiv.textContent;
+                  if (baseText.includes('Buscando localización...')) {
+                      baseText = baseText.replace('Buscando localización...', errorMessage);
+                  } else {
+                      baseText += ' ' + errorMessage;
+                  }
+                 loadingStatusDiv.textContent = baseText;
+
+             } else {
+                  loadingStatusDiv.textContent = `Error: ${errorMessage}`; // If there was a prior error, replace
              }
+
 
              if (locationMarker) {
                 map.removeLayer(locationMarker);
@@ -1564,15 +1639,17 @@
             if (lastKnownLocation) {
                  map.setView(lastKnownLocation, Math.max(map.getZoom(), 16));
                  console.log("Centrando mapa en la última localización conocida al pulsar el botón.");
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Buscando localización...')) {
                        loadingStatusDiv.textContent = 'Datos iniciales cargados. Mapa centrado en tu posición.';
+                 } else if (loadingStatusDiv.textContent.includes('Buscando localización...')) {
+                     loadingStatusDiv.textContent = loadingStatusDiv.textContent.replace('Buscando localización...', 'Mapa centrado en tu posición.');
                  }
 
             } else {
                  console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
                  locateUser();
-                 if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                       loadingStatusDiv.textContent = 'Datos iniciales cargados. Buscando localización...';
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Buscando localización...')) {
+                       loadingStatusDiv.textContent += ' Buscando localización...';
                  }
             }
         });
