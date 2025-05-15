@@ -176,6 +176,7 @@
         window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
         let exclusionLayersLoaded = false; // Flag para saber si los datos de exclusión ya se cargaron
+        window.curvasNivelGeoJSONData = null; // Variable para almacenar los datos de curvas de nivel GeoJSON
 
         // --- Variables para localización GPS ---
         let locationMarker = null;
@@ -246,7 +247,7 @@
         let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
 
         // --- Control de nivel de zoom ---
-        const zoomLevelControl = L.control({position: 'bottomleft'});
+        const zoomLevelControl = L.control({position: 'topright'}); // Cambiado a 'topright'
 
         zoomLevelControl.onAdd = function (map) {
             this._div = L.DomUtil.create('div', 'leaflet-control-zoomlevel');
@@ -290,7 +291,10 @@
                          // turf.booleanIntersects es más eficiente que intersection para solo verificar cruce
                         if (turf.booleanIntersects(parcelFeature, contourFeature)) {
                              let elevation = null;
-                            if (contourFeature.properties.hasOwnProperty('ELEVACION')) {
+                             // Check for different possible elevation properties, prioritizing 'cota' as requested
+                            if (contourFeature.properties.hasOwnProperty('cota')) {
+                                elevation = parseFloat(contourFeature.properties.cota);
+                            } else if (contourFeature.properties.hasOwnProperty('ELEVACION')) {
                                 elevation = parseFloat(contourFeature.properties.ELEVACION);
                             } else if (contourFeature.properties.hasOwnProperty('valor')) {
                                 elevation = parseFloat(contourFeature.properties.valor);
@@ -298,11 +302,12 @@
                                 elevation = parseFloat(contourFeature.properties.altura);
                             }
 
+
                             if (elevation !== null && !isNaN(elevation)) {
                                 totalAltitude += elevation;
                                 intersectingContoursCount++;
                             } else {
-                                console.warn("Curva de nivel intersecta pero no tiene propiedad de elevación numérica válida:", contourFeature.properties);
+                                console.warn("Curva de nivel intersecta pero no tiene propiedad de elevación numérica válida (cota, ELEVACION, valor, altura):", contourFeature.properties);
                             }
                         }
                     } catch (e) {
@@ -316,6 +321,21 @@
             } else {
                 return "N/A (Sin curvas de nivel)"; // No hay curvas de nivel que crucen la parcela
             }
+        }
+
+        // Función para calcular el área de la parcela en hectáreas
+        function calculateAreaInHectares(parcelGeometry) {
+             if (!parcelGeometry) {
+                 return "N/A";
+             }
+             try {
+                 const areaSqMeters = turf.area(parcelGeometry);
+                 const areaHectares = areaSqMeters / 10000; // 1 hectárea = 10,000 m²
+                 return areaHectares.toFixed(2); // Formatear a 2 decimales
+             } catch (e) {
+                 console.error("Error calculating area with Turf.js:", e);
+                 return "Error";
+             }
         }
 
 
@@ -380,69 +400,6 @@
             .then(([parcelasGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => {
                 console.log("Los archivos Parcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
-                // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
-                console.log("Inspeccionando y cargando capa de Parcelas...");
-                 if (parcelasGeojsonData && parcelasGeojsonData.type === 'FeatureCollection' && Array.isArray(parcelasGeojsonData.features)) {
-                     parcelasLayer = L.geoJSON(parcelasGeojsonData, {
-                         style: feature => ({ color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }), // Estilo por defecto de parcela
-                         onEachFeature: (feature, layer) => {
-                             const defaultStyle = { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
-                             originalStyle[layer._leaflet_id] = defaultStyle; // Guardar el estilo por defecto
-
-                             layer.on({
-                                 click: e => {
-                                     // Check if zoom level is 14 or higher before showing popup
-                                     if (map.getZoom() >= 14) {
-                                         if (selectedLayer) {
-                                             selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
-                                         }
-                                         layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
-                                         selectedLayer = layer;
-                                         generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
-                                         console.log("Parcela seleccionada:", feature.properties);
-
-                                         // Build popup content
-                                         let popupContent = '<b>Parcela Seleccionada:</b><br>';
-                                         let poligono = feature.properties['MASA'] || feature.properties['poligono'] || 'N/A'; // Assuming 'MASA' or 'poligono' for poligono
-                                         let parcela = feature.properties['PARCELA'] || feature.properties['parcela'] || 'N/A'; // Assuming 'PARCELA' or 'parcela' for parcela
-
-                                         popupContent += `Polígono: ${poligono}<br>`;
-                                         popupContent += `Parcela: ${parcela}<br>`;
-
-                                          // Calculate and add mean altitude
-                                          const meanAltitude = calculateMeanAltitude(feature.geometry, curvasNivelGeojsonData);
-                                          popupContent += `Altitud Media: ${meanAltitude} m`;
-
-
-                                         layer.bindPopup(popupContent).openPopup();
-
-                                     } else {
-                                          // Optional: show a temporary message or just do nothing if zoom is too low
-                                          console.log("Zoom level too low to show parcel info popup.");
-                                          // If a parcel was previously selected, deselect it visually
-                                            if (selectedLayer) {
-                                                selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
-                                            }
-                                            selectedLayer = null; // Deselect the layer in our variable
-                                            generarPasadasBtn.disabled = true; // Disable button if no valid selection
-                                          // You might want to prevent styling changes or popup opening below zoom 14
-                                          // If you clicked a parcel below zoom 14, it won't be selected for pass generation
-                                     }
-
-
-                                     L.DomEvent.stopPropagation(e);
-                                 }
-                             });
-                         }
-                     }).addTo(map);
-                     overlayLayers["Mis Parcelas"] = parcelasLayer;
-                     console.log(`Parcelas cargadas en Leaflet. Número de features en datos brutos: ${parcelasGeojsonData.features.length}`);
-                 } else {
-                     console.error("Datos de Parcelas no son un FeatureCollection válido o están vacíos.", parcelasGeojsonData);
-                      loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.'; // Sobrescribir si hay error de carga de datos
-                     alert("Error: El archivo de Parcelas no contiene un FeatureCollection válido. No se pueden cargar las parcelas.");
-                 }
-
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
                   if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
@@ -470,6 +427,75 @@
                        }
                  }
                 // --- Fin del código para curvas de nivel ---
+
+
+                // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
+                console.log("Inspeccionando y cargando capa de Parcelas...");
+                 if (parcelasGeojsonData && parcelasGeojsonData.type === 'FeatureCollection' && Array.isArray(parcelasGeojsonData.features)) {
+                     parcelasLayer = L.geoJSON(parcelasGeojsonData, {
+                         style: feature => ({ color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }), // Estilo por defecto de parcela
+                         onEachFeature: (feature, layer) => {
+                             const defaultStyle = { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
+                             originalStyle[layer._leaflet_id] = defaultStyle; // Guardar el estilo por defecto
+
+                             layer.on({
+                                 click: e => {
+                                     // Always deselect the previously selected layer and reset its style
+                                     if (selectedLayer) {
+                                         selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
+                                         // Close the popup of the previously selected layer if it's open
+                                         if (selectedLayer.getPopup() && selectedLayer.getPopup().isOpen()) {
+                                             selectedLayer.closePopup();
+                                         }
+                                     }
+
+                                     // Select the new layer visually and update the selectedLayer variable
+                                     layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
+                                     selectedLayer = layer;
+                                     generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
+                                     console.log("Parcela seleccionada:", feature.properties);
+
+                                     // Check if zoom level is 14 or higher before showing popup
+                                     if (map.getZoom() >= 14) {
+                                         // Build popup content
+                                         let popupContent = '<b>Parcela Seleccionada:</b><br>';
+                                         let poligono = feature.properties['MASA'] || feature.properties['poligono'] || 'N/A'; // Assuming 'MASA' or 'poligono' for poligono
+                                         let parcela = feature.properties['PARCELA'] || feature.properties['parcela'] || 'N/A'; // Assuming 'PARCELA' or 'parcela' for parcela
+
+                                         popupContent += `Polígono: ${poligono}<br>`;
+                                         popupContent += `Parcela: ${parcela}<br>`;
+
+                                          // Calculate and add mean altitude
+                                          const meanAltitude = calculateMeanAltitude(feature.geometry, window.curvasNivelGeoJSONData);
+                                          popupContent += `Altitud Media: ${meanAltitude} m<br>`;
+
+                                          // Calculate and add area in hectares
+                                          const areaHa = calculateAreaInHectares(feature.geometry);
+                                          popupContent += `Área: ${areaHa} Ha`;
+
+                                         layer.bindPopup(popupContent).openPopup();
+
+                                     } else {
+                                          // If zoom is too low, just select the layer visually but don't show popup
+                                          console.log("Zoom level too low to show parcel info popup. Zoom >= 14 required.");
+                                          // Optionally, you could bind a simple popup explaining the zoom requirement,
+                                          // but the user asked not to show the info globe before zoom 14.
+                                     }
+
+
+                                     L.DomEvent.stopPropagation(e);
+                                 }
+                             });
+                         }
+                     }).addTo(map);
+                     overlayLayers["Mis Parcelas"] = parcelasLayer;
+                     console.log(`Parcelas cargadas en Leaflet. Número de features en datos brutos: ${parcelasGeojsonData.features.length}`);
+                 } else {
+                     console.error("Datos de Parcelas no son un FeatureCollection válido o están vacíos.", parcelasGeojsonData);
+                      loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.'; // Sobrescribir si hay error de carga de datos
+                     alert("Error: El archivo de Parcelas no contiene un FeatureCollection válido. No se pueden cargar las parcelas.");
+                 }
+
 
                 // --- Código para manejar la carga del MDT (TIFF) ---
                  console.log("Intento de carga de MDT (TIFF) completado.");
@@ -504,7 +530,7 @@
                            if (lastKnownLocation) {
                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una parcela.';
                            } else {
-                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Buscando localización. Selecciona una parcela.';
+                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Buscando localización...';
                            }
                      } else {
                          loadingStatusDiv.textContent = 'Datos iniciales cargados. Geolocalización no soportada o no iniciada. Selecciona una parcela.';
@@ -938,7 +964,7 @@
                                                    } else {
                                                         try {
                                                              consolidatedCleanArea = turf.union(...validGeomsInCleanedArea);
-                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanArea.geometry.type : 'null/undefined');
+                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanarea.geometry.type : 'null/undefined');
                                                         } catch(e) {
                                                              console.error("Error al consolidar GeometryCollection resultante de difference:", e);
                                                               console.warn("Error procesando el área limpia compleja. Devolviendo null.");
