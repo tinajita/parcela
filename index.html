@@ -9,6 +9,7 @@
         crossorigin="anonymous"/>
 
     <style>
+        /* Estilos por defecto para pantallas más grandes */
         #map {
             height: 500px;
             width: 80%;
@@ -45,6 +46,30 @@
              font-size: 1em;
              color: #555;
          }
+
+        /* --- Estilos para dispositivos móviles --- */
+        @media (max-width: 600px) {
+            #map {
+                height: 70vh; /* Usa 70% del alto del viewport en pantallas pequeñas */
+                width: 100%; /* Usa todo el ancho en pantallas pequeñas */
+                margin: 10px auto; /* Ajusta el margen */
+            }
+            .container {
+                width: 100%; /* Usa todo el ancho en pantallas pequeñas */
+                margin: 10px auto; /* Ajusta el margen */
+            }
+            /* Ajusta otros estilos para móvil si es necesario, ej: tamaños de fuente, padding */
+            .control-container label, .control-container input, .control-container button {
+                display: block; /* Apila los controles verticalmente en pantallas pequeñas */
+                margin: 5px auto; /* Centra los controles */
+                width: 95%; /* Haz que los controles ocupen casi todo el ancho */
+            }
+             .control-container input[type="number"] {
+                 width: 95%; /* Ajusta el ancho para el input number */
+            }
+        }
+        /* --- Fin Estilos para dispositivos móviles --- */
+
     </style>
 </head>
 <body>
@@ -245,7 +270,6 @@
                       construccionesLayer = L.geoJSON(construccionesGeojsonData, {
                           style: feature => ({ color: '#FF0000', weight: 2, fillColor: '#FF0000', fillOpacity: 0.5 }),
                            onEachFeature: (feature, layer) => {
-                               // En esta versión original, solo se consideraban Polygons/MultiPolygons de CONSTRU
                                if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
                                   const clonedFeature = JSON.parse(JSON.stringify(feature));
                                    window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
@@ -275,9 +299,33 @@
                                 return { color: '#888888', weight: 1, opacity: 0.5 };
                            },
                            onEachFeature: (feature, layer) => {
-                               // En esta versión original, no se usaban las geometrías de ELEMLIN para exclusión
-                               // La lógica para buffer y añadir a exclusionFeatures se añadió después
-                               console.log(`Elemento Interno (${feature.geometry ? feature.geometry.type : 'null/undefined'}). No se usará para exclusión en esta versión base.`);
+                               if (feature.geometry) {
+                                   if (feature.geometry.type === 'LineString') {
+                                       try {
+                                           const buffered = turf.buffer(feature, bufferDistanceForLines, {units: units});
+                                            // *** CORRECCIÓN APLICADA AQUÍ ***
+                                            if (buffered && buffered.geometry && (buffered.geometry.type === 'Polygon' || buffered.geometry.type === 'MultiPolygon')) {
+                                                 // Clonar la feature bufferizada para evitar referencias.
+                                                 const bufferedFeature = JSON.parse(JSON.stringify(buffered));
+                                                 window.exclusionFeatures.push(bufferedFeature); // Añadir la feature con la geometría del buffer
+                                                  console.log(`LineString de Elementos Internos bufferizado a ${buffered.geometry.type} y añadido como exclusión.`); // Log actualizado
+                                            } else {
+                                                console.warn("El buffer de LineString de Elementos Internos no resultó en una geometría válida (Polygon/MultiPolygon) para exclusión. No se usará para recorte:", buffered);
+                                            }
+                                       } catch (e) {
+                                            console.error("Error al crear buffer para LineString de Elementos Internos:", feature, e);
+                                            console.warn("Error al crear buffer para LineString de Elemento Interno. No se usará para recorte.");
+                                       }
+
+                                   } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+                                       // Si es un Polígono/MultiPolígono original, añadirlo directamente
+                                       const clonedFeature = JSON.parse(JSON.stringify(feature));
+                                       window.exclusionFeatures.push(clonedFeature); // Usar window.exclusionFeatures
+                                        console.log(`Polygon/MultiPolygon de Elementos Internos añadido como exclusión.`); // Log actualizado
+                                   } else {
+                                        console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) no es LineString, Polígono o MultiPolígono. No se usará para recorte:`, feature.geometry);
+                                   }
+                               }
                            }
                        }).addTo(map);
                        overlayLayers["Viales y Arroyos"] = elementosInternosLayer; // Añadido de nuevo al control de capas
@@ -357,7 +405,7 @@
                 // --- Fin código MDT ---
 
 
-                 console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos (solo Polígonos/MultiPolígonos de Construcciones en esta versión base): ${window.exclusionFeatures.length}`);
+                 console.log(`Total features de exclusión recopiladas de Construcciones y Elementos Internos: ${window.exclusionFeatures.length}`);
                  console.log("Estado de exclusionFeatures global DESPUÉS de la carga:", window.exclusionFeatures.length, window.exclusionFeatures);
 
 
@@ -436,11 +484,9 @@
                 // --- Lógica para obtener features de exclusión que intersectan con la parcela seleccionada ---
                  if (globalExclusionFeatures.length > 0) {
                      console.log(`Total features de exclusión cargadas globalmente: ${globalExclusionFeatures.length}`);
-                     console.log(`Filtrando features de exclusión (SOLO CONSTRUCCIONES Polygon/MultiPolygon en esta versión base) para encontrar las que intersectan con la parcela seleccionada.`);
-                     // NOTA: En esta versión base, globalExclusionFeatures solo contiene Polygon/MultiPolygon de Construcciones.
-                     // La lógica para incluir Elementos Internos (bufferizados) se añadió en versiones posteriores.
+                     console.log(`Filtrando features de exclusión para encontrar las que intersectan con la parcela seleccionada.`);
                       globalExclusionFeatures.forEach((exclusionFeature, index) => {
-                          // exclusionFeature en esta versión DEBE ser un Feature con Polígono/MultiPolígono de Construcciones
+                          // exclusionFeature ahora DEBERÍA ser un Feature con Polígono/MultiPolígono (buffers si eran LineString)
                          if (exclusionFeature.geometry && (exclusionFeature.geometry.type === 'Polygon' || exclusionFeature.geometry.type === 'MultiPolygon')) {
                               try {
                                    // Verificar si la feature de exclusión intersecta con la parcela seleccionada
@@ -452,14 +498,14 @@
                                   console.warn(`Error al verificar intersección para feature de exclusión #${index}. Se omitirá.`, exclusionFeature, e);
                               }
                          } else {
-                              // Este log no debería aparecer si globalExclusionFeatures solo contiene Polígonos/MultiPolígonos de Construcciones
+                              // Esta advertencia ya no debería aparecer para los LineStrings si la corrección funcionó
                               console.warn(`Geometría de feature de exclusión #${index} (${exclusionFeature.geometry ? exclusionFeature.geometry.type : 'null/undefined'}) no es Polígono/MultiPolígono válido para intersección. Se omitirá.`, exclusionFeature);
                          }
                       });
                  } else {
                      console.log("No se cargaron features de exclusión globalmente (exclusionFeatures está vacío).");
                  }
-                console.log(`Features de exclusión (SOLO CONSTRUCCIONES Polygon/MultiPolygon) que intersectan con la parcela: ${intersectingExclusionFeatures.length}`);
+                console.log(`Features de exclusión que intersectan con la parcela: ${intersectingExclusionFeatures.length}`);
 
 
                 // --- Simplificar ligeramente las features de exclusión que intersectan ---
@@ -1131,78 +1177,87 @@
                             continue;
                         }
 
-                       // En esta versión base, se usa turf.lineSlice para obtener segmentos dentro del polígono.
-                       // No hay muestreo punto a punto ni verificación de pendiente/elevación aquí.
-                       let lineSegments = null;
-                        try {
-                            // lineSlice regresa un FeatureCollection de LineStrings o MultiLineStrings
-                           lineSegments = turf.lineSlice(turf.point([rotatedBboxWest, passCenterCoord]), turf.point([rotatedBboxEast, passCenterCoord]), rotatedGeometryForSweepAndPiP);
 
-                            // NOTA: El lineSlice en esta versión base no usa el concepto de "área limpia",
-                            // solo corta la línea de barrido contra la geometría SIMPLIFICADA de la parcela original.
-                            // La lógica para usar la "área limpia" (parcela - exclusiones) en lineSlice o
-                            // pasar a un enfoque de muestreo punto a punto con PiP se añadió en versiones posteriores.
+                       let currentSegmentPoints = [];
 
-                        } catch(e) {
-                             console.warn("Error en turf.lineSlice para línea de barrido completa:", fullSweepLineInRotatedSpace, e);
-                             // Continuar a la siguiente pasada si lineSlice falla
-                             rotatedCurrentOffset += workingWidth;
-                             continue;
-                        }
+                       for (let i = 0; i <= lineLength; i += samplingDistance) {
+                           let point = null;
+                           try {
+                               point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
+                           } catch(e) {
+                               console.warn("Error en turf.along al muestrear punto.", i, e);
+                               continue;
+                           }
+
+                           if (!point || !point.geometry || !point.geometry.coordinates) {
+                                console.warn(`turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
+                                continue;
+                           }
 
 
-                       if (lineSegments && lineSegments.type === 'FeatureCollection' && Array.isArray(lineSegments.features)) {
-                            lineSegments.features.forEach(segment => {
-                                if (segment && segment.geometry && segment.geometry.type === 'LineString') {
+                           let isInside = false;
+                           if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
+                               try {
+                                   isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
+                               } catch(e) {
+                                   console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
+                                   isInside = false;
+                               }
+                           } else {
+                               console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
+                               isInside = false;
+                           }
+
+
+                           if (isInside && point && point.geometry && point.geometry.coordinates) {
+                               currentSegmentPoints.push(point.geometry.coordinates);
+                           } else {
+                               if (currentSegmentPoints.length > 1) {
                                     try {
-                                         // turf.length puede lanzar errores con geometrías inválidas
-                                        if (turf.length(segment, { units: units }) > 0.5) { // Añadir solo segmentos de longitud significativa
-                                             // Rotar el segmento de vuelta y añadirlo al mapa
-                                             if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                                                 console.warn(`Centroide no válido al rotar segmento. Saltando rotación para este segmento.`);
-                                                 return; // Saltar este segmento, no la pasada completa
-                                             }
-                                            const originalSegmentGeometry = turf.transformRotate(segment.geometry, -rotationAngle, {pivot: centroid});
-                                            L.geoJSON(originalSegmentGeometry, {
-                                                style: { color: '#800080', weight: 2 }
-                                            }).addTo(generatedPassesLayer);
-                                        }
+                                        generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                                     } catch(e) {
-                                        console.warn("Error verificando o rotando segmento:", segment, e);
+                                        console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
                                     }
-                                } else if (segment && segment.geometry && segment.geometry.type === 'MultiLineString') {
-                                     console.warn("lineSlice devolvió un MultiLineString. Procesando partes.");
-                                      turf.geomEach(segment.geometry, function(linePart) {
-                                           if (linePart.type === 'LineString') {
-                                                 try {
-                                                      if (turf.length(turf.feature(linePart), { units: units }) > 0.5) { // turf.length espera Feature o Geometry
-                                                           if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
-                                                                console.warn(`Centroide no válido al rotar parte de MultiLineString. Saltando rotación.`);
-                                                                return;
-                                                           }
-                                                           const originalPartGeometry = turf.transformRotate(linePart, -rotationAngle, {pivot: centroid});
-                                                           L.geoJSON(originalPartGeometry, {
-                                                               style: { color: '#800080', weight: 2 }
-                                                           }).addTo(generatedPassesLayer);
-                                                      }
-                                                 } catch(e) {
-                                                      console.warn("Error verificando o rotando parte de MultiLineString:", linePart, e);
-                                                 }
-                                           }
-                                      });
-                                } else {
-                                     console.warn(`Segmento de lineSlice no es LineString/MultiLineString válido (${segment ? segment.geometry.type : 'null/undefined'}). Se omitirá.`, segment);
-                                }
-                            });
-                       } else {
-                             console.log("lineSlice no devolvió FeatureCollection con features o está vacío.");
+                               }
+                               currentSegmentPoints = [];
+                           }
                        }
 
+                       if (currentSegmentPoints.length > 1) {
+                            try {
+                                generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
+                           } catch(e) {
+                                console.error("Error en turf.lineString al crear segmento final de pasada rotada:", e);
+                           }
+                       }
 
                        rotatedCurrentOffset += workingWidth;
                    }
                }
 
+
+               console.log(`Generadas ${generatedRotatedPasses.length} pasadas (segmentos de LineString) en el espacio rotado.`);
+
+               console.log(`Rotando pasadas de vuelta por ${-rotationAngle.toFixed(2)} grados.`);
+               generatedRotatedPasses.forEach((rotatedPass, index) => {
+                   try {
+                        if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
+                             if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
+                                 console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
+                                 return;
+                             }
+                             const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
+                             L.geoJSON(originalPassGeometry, {
+                                 style: { color: '#800080', weight: 2 }
+                             }).addTo(generatedPassesLayer);
+                        } else {
+                             console.warn(`La pasada rotada #${index} no es un LineString válido. No se añadirá al mapa.`, rotatedPass);
+                        }
+
+                   } catch (e) {
+                       console.warn(`Error al rotar una pasada de vuelta (#${index}):`, rotatedPass, e);
+                   }
+               });
 
                console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
                 console.log("--- Fin Generación de Pasadas ---");
