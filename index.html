@@ -315,6 +315,7 @@
 
                              layer.on({
                                  click: e => {
+                                     // Lógica de selección y estilo
                                      if (selectedLayer) {
                                          selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
                                      }
@@ -322,6 +323,45 @@
                                      selectedLayer = layer;
                                      generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
                                      console.log("Parcela seleccionada:", feature.properties);
+
+                                     // Lógica para mostrar info solo en zoom cercano
+                                     const currentZoom = map.getZoom();
+                                     const zoomThreshold = 17; // Define aquí el nivel de zoom a partir del cual se muestra la info
+
+                                     if (currentZoom >= zoomThreshold) {
+                                         let popupContent = '<b>Información de Parcela:</b><br>';
+
+                                         // Intenta obtener propiedades comunes para polígono y parcela
+                                         const poligono = feature.properties['POLIGONO'] || feature.properties['poligono'] || 'N/D';
+                                         const parcela = feature.properties['PARCELA'] || feature.properties['parcela'] || 'N/D';
+
+                                         popupContent += `Polígono: ${poligono}<br>`;
+                                         popupContent += `Parcela: ${parcela}<br>`;
+
+                                         // Puedes añadir aquí otras propiedades si las conoces, por ejemplo:
+                                         // const altitud = feature.properties['ALTITUD'] || 'N/D';
+                                         // popupContent += `Altitud: ${altitud}<br>`;
+                                         // const pendiente = feature.properties['PENDIENTE'] || 'N/D';
+                                         // popupContent += `Pendiente: ${pendiente}<br>`;
+
+                                         // O lista todas las propiedades si no sabes cuáles hay o quieres verlas todas
+                                         popupContent += '<br>Otras propiedades:<br>';
+                                         for (const key in feature.properties) {
+                                             if (feature.properties.hasOwnProperty(key)) {
+                                                  // Evitar mostrar las que ya mostramos arriba si quieres
+                                                  if (key.toLowerCase() !== 'poligono' && key.toLowerCase() !== 'parcela') {
+                                                     popupContent += `<b>${key}:</b> ${feature.properties[key]}<br>`;
+                                                  }
+                                             }
+                                         }
+
+
+                                         layer.bindPopup(popupContent).openPopup();
+                                     } else {
+                                          // Si el zoom está por debajo del umbral, asegúrate de que no haya un popup abierto
+                                          map.closePopup();
+                                     }
+
 
                                      L.DomEvent.stopPropagation(e);
                                  }
@@ -348,6 +388,8 @@
                                 };
                            },
                            onEachFeature: function(feature, layer) {
+                                // Se mantienen comentadas las líneas que asociaban un popup al click en las curvas de nivel
+                                /*
                                 if (feature.properties) {
                                     let elevation = null;
                                     if (feature.properties.hasOwnProperty('ELEVACION')) {
@@ -358,8 +400,6 @@
                                         elevation = feature.properties.altura;
                                     }
 
-                                    // Se comentan las líneas que asocian un popup al click en las curvas de nivel
-                                    /*
                                     if (elevation !== null) {
                                         layer.bindPopup('Elevación: ' + elevation + ' m');
                                     } else {
@@ -371,15 +411,15 @@
                                          }
                                          layer.bindPopup(popupContent);
                                     }
-                                    */
                                 }
+                                */
                            }
                        }).addTo(map);
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
                        console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán curvas.", curvasNivelGeojsonData);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
