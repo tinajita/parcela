@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con generación de pasadas</title>
+    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -80,16 +80,6 @@
              line-height: 1em; /* Centra el icono verticalmente */
          }
 
-        /* Estilo para el control de zoom level */
-        .leaflet-control-zoom-level {
-            background-color: rgba(255, 255, 255, 0.8);
-            padding: 5px;
-            border-radius: 4px;
-            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
-            font-size: 14px;
-            text-align: center;
-            min-width: 50px; /* Ajusta según necesidad */
-        }
 
         /* --- Estilos para dispositivos móviles --- */
         @media (max-width: 600px) {
@@ -125,6 +115,17 @@
 
         }
         /* --- Fin Estilos para dispositivos móviles --- */
+
+        /* Estilo para el control de zoom */
+        .leaflet-control-zoomlevel {
+            background-color: #fff;
+            border: 2px solid rgba(0,0,0,0.2);
+            background-clip-padding: padding-box;
+            padding: 4px 8px;
+            text-align: center;
+            font-size: 14px;
+            cursor: default;
+        }
 
     </style>
 </head>
@@ -244,23 +245,23 @@
 
         let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
 
-        // --- Añadir control de zoom (+ y -) ---
-        L.control.zoom({ position: 'bottomright' }).addTo(map); // Puedes ajustar la posición si lo deseas
-
-        // --- Añadir control para mostrar el nivel de zoom actual ---
-        const zoomLevelControl = L.control({ position: 'topright' }); // Puedes ajustar la posición (topleft, topright, bottomleft, bottomright)
+        // --- Control de nivel de zoom ---
+        const zoomLevelControl = L.control({position: 'bottomleft'});
 
         zoomLevelControl.onAdd = function (map) {
-            this._div = L.DomUtil.create('div', 'leaflet-control-zoom-level');
-            this._div.innerHTML = 'Zoom: ' + map.getZoom();
+            this._div = L.DomUtil.create('div', 'leaflet-control-zoomlevel');
+            this.update();
             return this._div;
+        };
+
+        zoomLevelControl.update = function () {
+            this._div.innerHTML = 'Zoom: ' + map.getZoom();
         };
 
         zoomLevelControl.addTo(map);
 
-        // Actualizar el control de zoom level cuando el zoom cambia
         map.on('zoomend', function() {
-            zoomLevelControl._div.innerHTML = 'Zoom: ' + map.getZoom();
+            zoomLevelControl.update();
         });
 
 
@@ -272,61 +273,50 @@
              layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
         }
 
-        // Función para calcular la altitud media de una parcela a partir de las curvas de nivel que la intersectan
-         function calculateAverageAltitude(parcelGeometry, curvasNivelLayer) {
-             if (typeof turf === 'undefined') {
-                  console.error("Turf.js no está disponible para calcular altitud media.");
-                  return null;
-             }
-              if (!parcelGeometry || (parcelGeometry.type !== 'Polygon' && parcelGeometry.type !== 'MultiPolygon')) {
-                 console.warn("Geometría de parcela inválida para cálculo de altitud media.");
-                 return null;
-             }
-             if (!curvasNivelLayer || !curvasNivelLayer.getLayers || curvasNivelLayer.getLayers().length === 0) {
-                 console.warn("Capa de curvas de nivel no disponible o vacía para cálculo de altitud media.");
-                 return null;
-             }
+        // Función para calcular la altitud media de una parcela usando curvas de nivel
+        function calculateMeanAltitude(parcelGeometry, curvasNivelGeoJSON) {
+            let totalAltitude = 0;
+            let intersectingContoursCount = 0;
 
-             const parcelFeature = turf.feature(parcelGeometry);
-             const elevations = [];
+            if (!parcelGeometry || !curvasNivelGeoJSON || !curvasNivelGeoJSON.features) {
+                return null; // Datos inválidos
+            }
 
-             curvasNivelLayer.eachLayer(function(layer) {
-                 const curvaFeature = layer.feature;
-                  if (curvaFeature && curvaFeature.geometry) {
-                     try {
-                         // Check if the contour line intersects the parcel geometry
-                         if (turf.booleanIntersects(parcelFeature, curvaFeature)) {
+            const parcelFeature = turf.feature(parcelGeometry);
+
+            curvasNivelGeoJSON.features.forEach(contourFeature => {
+                if (contourFeature.geometry && contourFeature.geometry.type === 'LineString') {
+                    try {
+                         // turf.booleanIntersects es más eficiente que intersection para solo verificar cruce
+                        if (turf.booleanIntersects(parcelFeature, contourFeature)) {
                              let elevation = null;
-                             if (curvaFeature.properties) {
-                                 if (curvaFeature.properties.hasOwnProperty('ELEVACION')) {
-                                     elevation = parseFloat(curvaFeature.properties.ELEVACION);
-                                 } else if (curvaFeature.properties.hasOwnProperty('valor')) {
-                                     elevation = parseFloat(curvaFeature.properties.valor);
-                                 } else if (curvaFeature.properties.hasOwnProperty('altura')) {
-                                      elevation = parseFloat(curvaFeature.properties.altura);
-                                 }
-                             }
+                            if (contourFeature.properties.hasOwnProperty('ELEVACION')) {
+                                elevation = parseFloat(contourFeature.properties.ELEVACION);
+                            } else if (contourFeature.properties.hasOwnProperty('valor')) {
+                                elevation = parseFloat(contourFeature.properties.valor);
+                            } else if (contourFeature.properties.hasOwnProperty('altura')) {
+                                elevation = parseFloat(contourFeature.properties.altura);
+                            }
 
-                             if (elevation !== null && !isNaN(elevation)) {
-                                 elevations.push(elevation);
-                             } else {
-                                  console.warn("Curva de nivel intersectando pero sin propiedad de elevación válida:", curvaFeature.properties);
-                             }
-                         }
-                     } catch (e) {
-                         console.error("Error al verificar intersección para curva de nivel:", e);
-                     }
-                  }
-             });
+                            if (elevation !== null && !isNaN(elevation)) {
+                                totalAltitude += elevation;
+                                intersectingContoursCount++;
+                            } else {
+                                console.warn("Curva de nivel intersecta pero no tiene propiedad de elevación numérica válida:", contourFeature.properties);
+                            }
+                        }
+                    } catch (e) {
+                         console.warn("Error verificando intersección de parcela con curva de nivel:", e, contourFeature);
+                    }
+                }
+            });
 
-             if (elevations.length === 0) {
-                 console.warn("No se encontraron curvas de nivel que intersecten la parcela seleccionada para calcular altitud media.");
-                 return null; // No intersecting contour lines
-             }
-
-             const averageElevation = elevations.reduce((sum, current) => sum + current, 0) / elevations.length;
-             return averageElevation;
-         }
+            if (intersectingContoursCount > 0) {
+                return (totalAltitude / intersectingContoursCount).toFixed(2); // Retornar media con 2 decimales
+            } else {
+                return "N/A (Sin curvas de nivel)"; // No hay curvas de nivel que crucen la parcela
+            }
+        }
 
 
         // --- Carga automática de los archivos iniciales (Parcelas, Curvas Nivel, MDT) al cargar la página ---
@@ -335,7 +325,7 @@
             loadingStatusDiv.textContent = 'Cargando datos geoespaciales iniciales...';
             generarPasadasBtn.disabled = true; // Asegurarse de que esté deshabilitado durante la carga
 
-            // --- Iniciar localización GPS (independiente de la carga de datos geoespaciales) ---
+            // --- Iniciar localización GPS (independiente de la carga de datos geoespacialess) ---
              // Solo iniciamos watchPosition una vez al cargar si el navegador lo soporta
              if (navigator.geolocation) {
                  if (!watchingLocation) {
@@ -401,44 +391,43 @@
 
                              layer.on({
                                  click: e => {
-                                     if (selectedLayer) {
-                                         selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
-                                     }
-                                     layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
-                                     selectedLayer = layer;
-                                     generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
-                                     console.log("Parcela seleccionada:", feature.properties);
+                                     // Check if zoom level is 14 or higher before showing popup
+                                     if (map.getZoom() >= 14) {
+                                         if (selectedLayer) {
+                                             selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
+                                         }
+                                         layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
+                                         selectedLayer = layer;
+                                         generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
+                                         console.log("Parcela seleccionada:", feature.properties);
 
-                                     // --- Lógica para mostrar popup solo si el zoom >= 17 ---
-                                     if (map.getZoom() >= 17) {
-                                          let popupContent = "Información de Parcela:<br>";
-                                          const poligono = feature.properties.poligono || 'N/A';
-                                          const parcela = feature.properties.parcela || 'N/A';
-                                           popupContent += `<b>Polígono:</b> ${poligono}<br>`;
-                                           popupContent += `<b>Parcela:</b> ${parcela}<br>`;
+                                         // Build popup content
+                                         let popupContent = '<b>Parcela Seleccionada:</b><br>';
+                                         let poligono = feature.properties['MASA'] || feature.properties['poligono'] || 'N/A'; // Assuming 'MASA' or 'poligono' for poligono
+                                         let parcela = feature.properties['PARCELA'] || feature.properties['parcela'] || 'N/A'; // Assuming 'PARCELA' or 'parcela' for parcela
 
-                                           // Calcular altitud media si las curvas de nivel están cargadas
-                                           if (curvasNivelLayer && typeof turf !== 'undefined') {
-                                                const averageAltitude = calculateAverageAltitude(feature.geometry, curvasNivelLayer);
-                                                if (averageAltitude !== null) {
-                                                     popupContent += `<b>Altitud Media:</b> ${averageAltitude.toFixed(2)} m<br>`;
-                                                } else {
-                                                    popupContent += `<b>Altitud Media:</b> No disponible (sin curvas de nivel intersectantes o error)<br>`;
-                                                }
-                                           } else {
-                                                popupContent += `<b>Altitud Media:</b> Calculando... (o Curvas de Nivel no cargadas)<br>`;
-                                           }
+                                         popupContent += `Polígono: ${poligono}<br>`;
+                                         popupContent += `Parcela: ${parcela}<br>`;
+
+                                          // Calculate and add mean altitude
+                                          const meanAltitude = calculateMeanAltitude(feature.geometry, curvasNivelGeojsonData);
+                                          popupContent += `Altitud Media: ${meanAltitude} m`;
 
 
-                                          layer.bindPopup(popupContent).openPopup();
+                                         layer.bindPopup(popupContent).openPopup();
+
                                      } else {
-                                          console.log("Zoom level por debajo de 17. No se mostrará el popup.");
-                                          // Asegurarse de que el popup esté cerrado si se había abierto antes con zoom >= 17
-                                           if (layer.getPopup()) {
-                                                map.closePopup(layer.getPopup());
-                                           }
+                                          // Optional: show a temporary message or just do nothing if zoom is too low
+                                          console.log("Zoom level too low to show parcel info popup.");
+                                          // If a parcel was previously selected, deselect it visually
+                                            if (selectedLayer) {
+                                                selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
+                                            }
+                                            selectedLayer = null; // Deselect the layer in our variable
+                                            generarPasadasBtn.disabled = true; // Disable button if no valid selection
+                                          // You might want to prevent styling changes or popup opening below zoom 14
+                                          // If you clicked a parcel below zoom 14, it won't be selected for pass generation
                                      }
-                                     // --- Fin Lógica para mostrar popup ---
 
 
                                      L.DomEvent.stopPropagation(e);
@@ -457,6 +446,8 @@
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
                   if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
+                       // Store the GeoJSON data globally or accessible for calculation
+                       window.curvasNivelGeoJSONData = curvasNivelGeojsonData; // Make it accessible for calculation
                        curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
                            style: function(feature) {
                                 return {
@@ -465,7 +456,9 @@
                                     opacity: 0.3
                                 };
                            }
-                           // No binding popups here, as altitude is calculated on parcel click
+                           // Popups for individual contour lines are removed as requested,
+                           // info will be aggregated for the parcel popup.
+                           // onEachFeature: function(feature, layer) { ... } is removed
                        }).addTo(map);
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
                        console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
@@ -482,6 +475,10 @@
                  console.log("Intento de carga de MDT (TIFF) completado.");
                  if (mdtTiffResponse && mdtTiffResponse.ok) {
                       console.log("MDT (TIFF) cargado con éxito (respuesta OK).");
+                      // Note: MDT TIFF loading and usage would require a library like geotiff.js
+                      // and specific logic to sample elevation at points, which is more complex
+                      // than averaging contour lines. This code currently just fetches it.
+                      // For calculating average altitude as requested, we use contour lines.
                  } else {
                       console.warn("Fallo al cargar el MDT (TIFF) o respuesta no OK.", mdtTiffResponse);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
@@ -1216,8 +1213,8 @@
 
                   try {
                        originalParcelBbox = turf.bbox(parcelGeometry);
-                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
+                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalBbox[1]]), {units: units});
+                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalBbox[3]]), {units: units});
                        originalParcelArea = turf.area(turf.feature(parcelGeometry));
                        originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
                        originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
