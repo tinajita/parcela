@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
+    <title>Mapa con generación de pasadas</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -138,19 +138,22 @@
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/geotiff@1.0.7/dist/geotiff.min.js"></script> <script>
+    <script>
         console.log("Estado de 'turf' inmediatamente después del script tag:", typeof turf);
         if (typeof turf === 'undefined') {
              console.error("VERIFICACIÓN: 'turf' es undefined justo después del script tag. El script de Turf.js NO se cargó o ejecutó como se esperaba.");
         } else {
              console.log("VERIFICACIÓN: 'turf' parece estar definido. Tipo:", typeof turf);
         }
+        // Eliminamos la verificación de GeoTIFF por ahora
+        /*
          console.log("Estado de 'GeoTIFF' inmediatamente después del script tag:", typeof GeoTIFF);
         if (typeof GeoTIFF === 'undefined') {
              console.error("VERIFICACIÓN: 'GeoTIFF' es undefined justo después del script tag. El script de GeoTIFF.js NO se cargó o ejecutó como se esperaba.");
         } else {
              console.log("VERIFICACIÓN: 'GeoTIFF' parece estar definido. Tipo:", typeof GeoTIFF);
         }
+        */
         // Si necesitas proj4js, descomenta la línea y verifica su estado similarmente.
         // console.log("Estado de 'proj4' inmediatamente después del script tag:", typeof proj4);
     </script>
@@ -175,7 +178,8 @@
         let elementosInternosLayer = null;
         let curvasNivelLayer = null; // Variable para la capa de curvas de nivel para visualización
 
-        let mdtImage = null; // Variable para almacenar la imagen TIFF del MDT procesada por geotiff.js
+        // Eliminamos la variable mdtImage
+        // let mdtImage = null; // Variable para almacenar la imagen TIFF del MDT procesada por geotiff.js
 
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
 
@@ -208,7 +212,7 @@
          });
 
         // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+         const esriOverlayLabels = L.tileLayer('https://services.arcgismnline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
              attribution: 'Esri, Garmin, FAO, NOAA, USGS',
              maxZoom: 17,
              transparent: true
@@ -243,7 +247,8 @@
         const overlayLayers = {
              "Cartografía Catastral (WMS)": catastroLayer,
              "Pasadas Generadas": generatedPassesLayer
-             // Las capas GeoJSON y MDT se añadirán aquí después de cargarse
+             // Las capas GeoJSON se añadirán aquí después de cargarse
+             // Eliminamos la capa MDT por ahora
         };
 
         let layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
@@ -257,7 +262,7 @@
              layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
         }
 
-        // --- Carga automática de los 4 archivos (3 GeoJSONs y 1 TIFF) al cargar la página ---
+        // --- Carga automática de los 3 archivos GeoJSON al cargar la página ---
         document.addEventListener('DOMContentLoaded', function() {
             console.log("El DOM está cargado. Iniciando carga automática de datos geoespaciales.");
             loadingStatusDiv.textContent = 'Cargando datos geoespaciales...';
@@ -295,7 +300,6 @@
                  if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Geolocalización no soportada')) {
                       loadingStatusDiv.textContent = 'Error: Geolocalización no soportada.';
                  }
-                //  alert("Tu navegador no soporta la funcionalidad de geolocalización necesaria."); // Evitar doble alert si ya hay error
              }
 
 
@@ -304,14 +308,14 @@
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
-            const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - Corregida para CORS
+            // Eliminamos la URL del MDT por ahora
+            // const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - Corregida para CORS
              // *** FIN URLs ***
 
              const units = 'meters'; // Unidades para Turf.js (buffer)
              const bufferDistanceForLines = 2; // Define una distancia de buffer adecuada en metros para LineStrings de ELEMLIN.json
 
-            // Usar Promise.all para cargar los archivos concurrentemente
-            // Incluimos el fetch del GeoJSON de curvas de nivel y el TIFF del MDT
+            // Usar Promise.all para cargar solo los 3 archivos GeoJSON
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
                      if (!response.ok) throw new Error(`Error al cargar Parcelas: ${response.statusText}`);
@@ -329,8 +333,9 @@
                  fetch(curvasNivelGeojsonDataUrl).then(response => {
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
-                 }),
-                 // Nueva promesa para procesar el MDT (TIFF) con geotiff.js
+                 })
+                 // Eliminamos la promesa del MDT
+                 /*
                  fetch(mdtGeoTiffDataUrl).then(async response => {
                       if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
                        console.log("MDT (TIFF) fetch successful. Status:", response.status);
@@ -342,28 +347,22 @@
                                 mdtImage = await tiff.getImage(); // Obtiene la primera (o única) imagen
 
                                 console.log("MDT (TIFF) procesado con geotiff.js. Dimensiones:", mdtImage.getWidth(), "x", mdtImage.getHeight());
-                                 // Aquí podrías almacenar información relevante del TIFF si la necesitas globalmente
-                                 // window.mdtImage = mdtImage; // Si quieres que sea global
-
                             } catch (e) {
                                 console.error("Error al procesar MDT (TIFF) con geotiff.js:", e);
-                                // No lanzar error aquí para no detener Promise.all, manejar el fallo de MDT más adelante
-                                return null; // Indica que el procesamiento del MDT falló
+                                return null;
                             }
-                            return mdtImage; // Retorna la imagen procesada si fue exitoso
+                            return mdtImage;
                        } else {
                            console.error("GeoTIFF.js no está cargado. No se puede procesar el MDT.");
-                           return null; // Indica que no se pudo procesar por falta de librería
+                           return null;
                        }
-
-
                  })
+                 */
             ])
-            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData, processedMdtImage]) => { // Asegúrate de recibir processedMdtImage
-                console.log("Los archivos GeoJSON se cargaron con éxito. Intento de procesamiento de MDT completado.");
-
-                // Asignar la imagen MDT procesada a la variable global (o local si prefieres)
-                mdtImage = processedMdtImage; // mdtImage ahora contiene la imagen TIFF o es null si falló el procesamiento
+            .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData]) => { // Ajustamos los parámetros recibidos
+                console.log("Los archivos GeoJSON se cargaron con éxito.");
+                // Eliminamos el manejo de processedMdtImage aquí
+                // mdtImage = processedMdtImage;
 
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
@@ -500,16 +499,17 @@
                  }
                 // --- Fin del código para curvas de nivel ---
 
-                // --- Manejar el resultado del procesamiento del MDT (ya se intentó procesar en el fetch) ---
+                 // Eliminamos el manejo de mdtImage aquí
+                 /*
                  if (mdtImage) {
                       console.log("MDT (TIFF) procesado y listo para usar.");
-                       // No creamos una capa visual del MDT por defecto, pero podrías añadirla aquí si quieres.
                  } else {
                       console.warn("MDT (TIFF) no pudo ser procesado. El cálculo de pendiente no estará disponible.");
                       if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                            loadingStatusDiv.textContent += ' Advertencia: MDT TIFF no procesado.';
                       }
                  }
+                 */
 
 
                  console.log(`Total features de Construcciones almacenadas: ${construccionesFeatures.length}`);
@@ -575,7 +575,8 @@
 
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS ---
 
-        generarPasadasBtn.addEventListener('click', async function() { // Convertir a async para usar await con geotiff.js
+        generarPasadasBtn.addEventListener('click', function() { // Cambiado de async a función normal
+
 
             // --- VERIFICACIÓN DE TURF ---
             console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
@@ -585,8 +586,8 @@
                 return;
             }
             // --- FIN VERIFICACIÓN ---
-             // --- VERIFICACIÓN DE GEOTIFF.JS ---
-            console.log("Estado de 'GeoTIFF' al hacer clic en Generadas Pasadas:", typeof GeoTIFF);
+             // Eliminamos la verificación de GeoTIFF aquí
+             // console.log("Estado de 'GeoTIFF' al hacer clic en Generadas Pasadas:", typeof GeoTIFF);
 
 
             console.log("--- Inicio Generación de Pasadas ---");
@@ -630,15 +631,13 @@
                  // Procesar features de Construcciones (Polígonos/MultiPolígonos)
                  if (construccionesFeatures.length > 0) {
                       let countConstruccionesIntersecting = 0;
-                      for (const feature of construccionesFeatures) { // Usar for...of para await si booleanIntersects fuera async
+                      for (const feature of construccionesFeatures) {
                           if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
                                // Usar bboxIntersects para una comprobación rápida inicial
                                if (turf.bboxIntersects(parcelFeature, feature)) {
                                    // Aunque bboxIntersects es rápido, una verificación de intersección geométrica es más precisa
-                                   // Turf.js booleanIntersects puede ser lento con geometrías complejas, pero filtrar por Bbox primero ayuda
                                     try {
-                                         // Esperar brevemente en cada booleanIntersects para no bloquear completamente (opcional, ajustar si es necesario)
-                                         // await new Promise(resolve => setTimeout(resolve, 0)); // Cede el control al event loop
+                                         // No necesitamos await aquí ya que booleanIntersects no es async
                                          if (turf.booleanIntersects(parcelFeature, feature)) {
                                               intersectingExclusionFeatures.push(feature); // Añadir la feature si intersecta
                                               countConstruccionesIntersecting++;
@@ -659,13 +658,13 @@
                  if (elementosInternosFeatures.length > 0) {
                       let countElementosInternosIntersecting = 0;
                       let countElementosInternosBuffered = 0;
-                       for (const feature of elementosInternosFeatures) { // Usar for...of para await si booleanIntersects fuera async
+                       for (const feature of elementosInternosFeatures) {
                            if (feature.geometry) {
                                 // Usar bboxIntersects para una comprobación rápida inicial
                                 if (turf.bboxIntersects(parcelFeature, feature)) {
                                     // Verificar intersección geométrica precisa
                                     try {
-                                          // await new Promise(resolve => setTimeout(resolve, 0)); // Cede el control al event loop
+                                          // No necesitamos await aquí
                                          if (turf.booleanIntersects(parcelFeature, feature)) {
                                                countElementosInternosIntersecting++;
                                               if (feature.geometry.type === 'LineString') {
@@ -689,7 +688,7 @@
                                               } else if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
                                                   // Si es Polígono/MultiPolígono e intersecta, añadirlo directamente
                                                    intersectingExclusionFeatures.push(feature); // Añadir la feature si intersecta
-                                                   // console.log("Polygon/MultiPolygon de Elementos Internos intersecta. Añadido como exclusión."); // Log detallado
+                                                   // console.log("Polygon/MultiPolígono de Elementos Internos intersecta. Añadido como exclusión."); // Log detallado
                                               } else {
                                                    console.warn(`Geometría de Elemento Interno (${feature.geometry.type}) intersecta, pero no es LineString, Polígono o MultiPolígono. Se omitirá.`, feature.geometry);
                                               }
@@ -1136,219 +1135,138 @@
                 let sweepDirectionInRotatedSpace = 0; // 0 para N-S (pasadas O-E), 1 para E-W (pasadas N-S)
                 let heuristicDirectionDescription = "";
 
-                // --- Lógica para determinar el ángulo de rotación: Priorizar pendiente si MDT está disponible ---
-                 if (mdtImage && typeof GeoTIFF !== 'undefined') {
-                      console.log("MDT Image está disponible. Intentando calcular ángulo de rotación basado en pendiente...");
-                      // === AQUÍ VA LA LÓGICA PARA CALCULAR EL ÁNGULO DE LA PENDIENTE DOMINANTE ===
-                      // Esto implica:
-                      // 1. Muestrear elevaciones en varios puntos de la parcela limpia (ej: centroide y puntos cardinales cercanos).
-                      //    Para ello, necesitarás convertir las coordenadas Lat/Lng a las coordenadas del CRS del TIFF
-                      //    y luego a coordenadas de píxel para leer los valores del mdtImage.
-                      //    La librería `geotiff.js` ayuda con esto (ver `image.getPoint()` o `image.readRasters()`).
-                      // 2. Calcular la dirección de la pendiente (bearing) a partir de las elevaciones muestreadas.
-                      //    Esto requiere matemáticas para estimar el gradiente (dz/dx, dz/dy).
-                      // 3. Determinar el ángulo de rotación para las pasadas, que debe ser perpendicular a la dirección de la pendiente dominante.
-                      //    `rotationAngle = slopeBearing + 90;` o `slopeBearing - 90;`.
+                // --- Lógica para determinar el ángulo de rotación: Usar la lógica de fallback existente (sin MDT) ---
+                 console.warn("MDT Image no disponible. Usando lógica de fallback para determinar el ángulo de rotación.");
+                // Si no se pudo calcular la pendiente, usar la lógica de fallback existente
+                  let originalParcelBbox = null;
+                  let originalBboxWidthMeters = 0;
+                  let originalBboxHeightMeters = 0;
+                  let originalParcelArea = 0;
+                  let originalBboxArea = 0;
+                  let originalRectangularity = 0;
 
-                      // === EJEMPLO CONCEPTUAL (REEMPLAZAR CON LA LÓGICA REAL) ===
-                       let slopeBearingFromMdt = null; // Placeholder: variable que DEBERÍAS calcular
+                   try {
+                        originalParcelBbox = turf.bbox(parcelGeometry);
+                        originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalBbox[1]]), {units: units});
+                        originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalBbox[3]]), {units: units});
+                        originalParcelArea = turf.area(turf.feature(parcelGeometry));
+                        originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
+                        originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
 
-                       // --- Inicio de ejemplo de cómo usar mdtImage para obtener elevación (solo 1 punto) ---
-                       if (centroid && centroid.geometry && centroid.geometry.coordinates) {
-                            const centroidCoordsWgs84 = centroid.geometry.coordinates; // [lng, lat]
-                            // Necesitarás convertir centroidCoordsWgs84 al CRS del TIFF si es diferente
-                            // Usando geotiff.js, puedes leer valores de píxel en una ventana geográfica:
-                            const image = mdtImage;
-                            // Define una ventana pequeña alrededor del centroide en coordenadas del CRS del TIFF
-                            // Asumiendo por ahora que el TIFF usa WGS84 (lo cual es común para Lat/Lng, pero no siempre para MDT)
-                            // Si el TIFF es proyectado (ej. UTM), necesitarás reproyectar centroidCoordsWgs84 primero.
-                            const sampleWindow = [
-                                centroidCoordsWgs84[0] - 0.00001, // xMin (Lng)
-                                centroidCoordsWgs84[1] - 0.00001, // yMin (Lat)
-                                centroidCoordsWgs84[0] + 0.00001, // xMax (Lng)
-                                centroidCoordsWgs84[1] + 0.00001  // yMax (Lat)
-                            ];
-                             // Ajusta el 0.00001 según la resolución de tu TIFF para muestrear ~1 píxel.
+                        console.log(`Dimensiones Bbox original (fallback): Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
 
-                             try {
-                                const rasters = await image.readRasters({ window: sampleWindow }); // Lee los valores de píxel en la ventana
-                                 if (rasters && rasters.length > 0 && rasters[0].length > 0) {
-                                     const elevationAtCentroid = rasters[0][0]; // Valor del primer píxel en la primera banda
-                                     console.log("Elevación muestreada en el centroide:", elevationAtCentroid);
+                   } catch(e) {
+                        console.error("Error calculando Bbox o Rectangularidad de la parcela original (fallback):", e);
+                   }
 
-                                      // === AQUÍ IRÍA LA LÓGICA PARA MUESTREAR MÁS PUNTOS Y CALCULAR SLOPEBEARING ===
-                                      // Esta es la parte compleja que mencionamos. Necesitarías:
-                                      // - Muestrear elevación en N, S, E, O (usando turf.destination y leyendo MDT en esos puntos)
-                                      // - Calcular diferencias de elevación y distancias para estimar el vector de pendiente.
-                                      // - Determinar el bearing (ángulo) de ese vector de pendiente.
-                                      // slopeBearingFromMdt = calcularSlopeBearing(...); // Implementar esta función
+                  let longestSegmentAngle = 0;
+                  let foundLongestSegment = false;
+                   if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
+                      const exteriorCoords = parcelGeometry.coordinates[0];
+                      if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
+                           let maxLength = 0;
+                           let p1Longest = null;
+                           let p2Longest = null;
 
-                                      // Si se logra calcular slopeBearingFromMdt:
-                                      // let slopeBasedRotation = slopeBearingFromMdt + 90; // O -90
-                                      // rotationAngle = (slopeBasedRotation % 360 + 360) % 360;
-                                      // heuristicDirectionDescription = `Pendiente dominante del MDT (ángulo calculado: ${slopeBearingFromMdt.toFixed(2)}°)`;
-                                       console.warn("Lógica de cálculo de pendiente aún no implementada. Usando lógica de fallback.");
-                                       slopeBearingFromMdt = null; // Asegura que fallback se use si no se implementa el cálculo
-
-                                 } else {
-                                     console.warn("No se pudieron leer valores de elevación del MDT en la ventana de muestreo.");
-                                      alert("Advertencia: No se pudo leer elevación del MDT en la parcela. Usando lógica de fallback.");
-                                     slopeBearingFromMdt = null; // Asegura que fallback se use
-                                 }
-                             } catch (e) {
-                                 console.error("Error al leer rasters del MDT:", e);
-                                  alert("Error al leer datos del MDT. Usando lógica de fallback.");
-                                 slopeBearingFromMdt = null; // Asegura que fallback se use
-                             }
-                       } else {
-                           console.warn("Centroide de la parcela no válido para muestreo de MDT.");
-                           slopeBearingFromMdt = null; // Asegura que fallback se use
-                       }
-                       // --- Fin de ejemplo de cómo usar mdtImage ---
-
-
-                      if (slopeBearingFromMdt !== null) {
-                           // Si se pudo calcular la pendiente desde el MDT, usar ese ángulo para la rotación
-                           let slopeBasedRotation = slopeBearingFromMdt + 90; // O -90; puedes necesitar lógica para elegir entre +90 y -90
-                           rotationAngle = (slopeBasedRotation % 360 + 360) % 360;
-                           sweepDirectionInRotatedSpace = 0; // Asumiendo pasadas horizontales en el espacio rotado por pendiente
-                           heuristicDirectionDescription = `Pendiente dominante del MDT (ángulo calculado: ${slopeBearingFromMdt.toFixed(2)}°)`;
-                           console.log(`Ángulo de rotación basado en pendiente calculado: ${rotationAngle.toFixed(2)}°`);
-
-                      } else {
-                          console.warn("No se pudo calcular el ángulo de pendiente del MDT. Usando lógica de fallback.");
-                          // Si no se pudo calcular la pendiente, usar la lógica de fallback existente
-                            let originalParcelBbox = null;
-                            let originalBboxWidthMeters = 0;
-                            let originalBboxHeightMeters = 0;
-                            let originalParcelArea = 0;
-                            let originalBboxArea = 0;
-                            let originalRectangularity = 0;
-
-                             try {
-                                  originalParcelBbox = turf.bbox(parcelGeometry);
-                                  originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                                  originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
-                                  originalParcelArea = turf.area(turf.feature(parcelGeometry));
-                                  originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
-                                  originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
-
-                                  console.log(`Dimensiones Bbox original (fallback): Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
-
-                             } catch(e) {
-                                  console.error("Error calculando Bbox o Rectangularidad de la parcela original (fallback):", e);
-                             }
-
-                            let longestSegmentAngle = 0;
-                            let foundLongestSegment = false;
-                             if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
-                                const exteriorCoords = parcelGeometry.coordinates[0];
-                                if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
-                                     let maxLength = 0;
-                                     let p1Longest = null;
-                                     let p2Longest = null;
-
-                                     for (let i = 0; i < exteriorCoords.length - 1; i++) {
-                                         const p1 = turf.point(exteriorCoords[i]);
-                                         const p2 = turf.point(exteriorCoords[i+1]);
-                                         try {
-                                            const length = turf.distance(p1, p2, {units: units});
-                                            if (length > maxLength) {
-                                                maxLength = length;
-                                                p1Longest = p1;
-                                                p2Longest = p2;
-                                            }
-                                         } catch(e) {
-                                            console.warn("Error calculando distancia para segmento en heurística (fallback):", p1, p2, e);
-                                         }
-
-                                     }
-
-                                     if (p1Longest && p2Longest) {
-                                         try {
-                                             longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
-                                             foundLongestSegment = true;
-                                             console.log(`Lado más largo de la parcela original encontrado (fallback). Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
-                                         } catch(e) {
-                                              console.warn("Error calculando bearing para lado más largo (fallback):", p1Longest, p2Longest, e);
-                                              foundLongestSegment = false;
-                                         }
-                                     } else {
-                                          console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo (fallback).");
-                                     }
-                                } else {
-                                    console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos (fallback).");
-                                }
-                             } else {
-                                  console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo (fallback).");
-                             }
-
-                            const useLongestSideThreshold = 0.7;
-
-                            if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
-                                rotationAngle = -longestSegmentAngle;
-                                sweepDirectionInRotatedSpace = 0;
-                                heuristicDirectionDescription = `Lado más largo de la parcela original (fallback: ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
-                                 console.log("Heurística (fallback): Usando el lado más largo como dirección principal.");
-
-                            } else {
-                                console.log("Heurística (fallback): Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
-                                if (originalBboxWidthMeters >= originalBboxHeightMeters) {
-                                    rotationAngle = 0;
-                                    sweepDirectionInRotatedSpace = 0;
-                                    heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual) (fallback)";
-                                } else {
-                                    rotationAngle = 90;
-                                    sweepDirectionInRotatedSpace = 0;
-                                    heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales) (fallback)";
-                                     console.log("Bbox más alta que ancha (fallback), rotando 90 grados para pasadas horizontales en el espacio rotado.");
-                                }
-                            }
-                            rotationAngle = (rotationAngle % 360 + 360) % 360; // Asegurar ángulo entre 0 y 360
-                            // Aquí, si usamos fallback, necesitamos determinar sweepDirectionInRotatedSpace
-                            // basándonos en el rotationAngle para que las pasadas sean O-E (0) o S-N (1) en el espacio rotado.
-                            // Si rotationAngle está cerca de 0 o 180, sweepDirectionInRotatedSpace = 0.
-                            // Si rotationAngle está cerca de 90 o 270, sweepDirectionInRotatedSpace = 1.
-                             const angleMod90 = rotationAngle % 90;
-                             if (angleMod90 < 45 || angleMod90 > 45) { // Más cerca de 0/90/180/270
-                                  if ((rotationAngle >= 315 || rotationAngle < 45) || (rotationAngle >= 135 && rotationAngle < 225)) {
-                                       // Cerca de 0 o 180 -> barrido S-N en espacio rotado (pasadas O-E)
-                                       sweepDirectionInRotatedSpace = 0;
-                                       console.log("Fallback: Ángulo de rotación cerca de 0/180. Barrido S-N en espacio rotado.");
-                                  } else {
-                                       // Cerca de 90 o 270 -> barrido O-E en espacio rotado (pasadas S-N)
-                                        sweepDirectionInRotatedSpace = 1;
-                                        console.log("Fallback: Ángulo de rotación cerca de 90/270. Barrido O-E en espacio rotado.");
+                           for (let i = 0; i < exteriorCoords.length - 1; i++) {
+                               const p1 = turf.point(exteriorCoords[i]);
+                               const p2 = turf.point(exteriorCoords[i+1]);
+                               try {
+                                  const length = turf.distance(p1, p2, {units: units});
+                                  if (length > maxLength) {
+                                      maxLength = length;
+                                      p1Longest = p1;
+                                      p2Longest = p2;
                                   }
+                               } catch(e) {
+                                  console.warn("Error calculando distancia para segmento en heurística (fallback):", p1, p2, e);
+                               }
 
-                             } else {
-                                  // Si el ángulo está justo en 45/135/225/315, podemos elegir arbitrariamente, o usar el barrido que resulte en más pasadas
-                                  // Para simplificar, usemos una heurística basada en la forma de la bbox rotada.
-                                  console.warn("Fallback: Ángulo de rotación cerca de 45/135/225/315. Usando heurística de Bbox rotada para decidir dirección de barrido.");
-                                   try {
-                                        const tempRotatedBbox = turf.bbox(turf.transformRotate(parcelFeature, rotationAngle, {pivot: centroid}));
-                                        const tempBboxWidth = turf.distance(turf.point([tempRotatedBbox[0], tempRotatedBbox[1]]), turf.point([tempRotatedBbox[2], tempRotatedBbox[1]]), {units: units});
-                                        const tempBboxHeight = turf.distance(turf.point([tempRotatedBbox[0], tempRotatedBbox[1]]), turf.point([tempRotatedBbox[0], tempRotatedBbox[3]]), {units: units});
-                                        if (tempBboxHeight >= tempBboxWidth) { // Si la bbox rotada es más alta que ancha (o igual)
-                                             // Barrido S-N en espacio rotado (pasadas O-E)
-                                             sweepDirectionInRotatedSpace = 0;
-                                              console.log("Fallback: Bbox rotada más alta que ancha. Barrido S-N en espacio rotado.");
-                                        } else {
-                                             // Barrido O-E en espacio rotado (pasadas S-N)
-                                              sweepDirectionInRotatedSpace = 1;
-                                              console.log("Fallback: Bbox rotada más ancha que alta. Barrido O-E en espacio rotado.");
-                                        }
-                                   } catch (e) {
-                                        console.error("Error calculando bbox rotada temporal para decidir dirección de barrido (fallback):", e);
-                                         console.warn("Fallback: Fallo al decidir dirección de barrido. Usando S-N por defecto.");
-                                        sweepDirectionInRotatedSpace = 0; // Default
-                                   }
-                             }
+                           }
 
-                           console.log(`Ángulo de rotación basado en heurística (fallback): ${rotationAngle.toFixed(2)}°, Dirección de barrido en espacio rotado (0=S-N, 1=O-E): ${sweepDirectionInRotatedSpace}`);
-
+                           if (p1Longest && p2Longest) {
+                               try {
+                                   longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
+                                   foundLongestSegment = true;
+                                   console.log(`Lado más largo de la parcela original encontrado (fallback). Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
+                               } catch(e) {
+                                    console.warn("Error calculando bearing para lado más largo (fallback):", p1Longest, p2Longest, e);
+                                    foundLongestSegment = false;
+                               }
+                           } else {
+                                console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo (fallback).");
+                           }
+                      } else {
+                          console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos (fallback).");
                       }
-                 }
+                   } else {
+                        console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo (fallback).");
+                   }
+
+                  const useLongestSideThreshold = 0.7;
+
+                  if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
+                      rotationAngle = -longestSegmentAngle;
+                      sweepDirectionInRotatedSpace = 0;
+                      heuristicDirectionDescription = `Lado más largo de la parcela original (fallback: ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
+                       console.log("Heurística (fallback): Usando el lado más largo como dirección principal.");
+
+                  } else {
+                      console.log("Heurística (fallback): Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
+                      if (originalBboxWidthMeters >= originalBboxHeightMeters) {
+                          rotationAngle = 0;
+                          sweepDirectionInRotatedSpace = 0;
+                          heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual) (fallback)";
+                      } else {
+                          rotationAngle = 90;
+                          sweepDirectionInRotatedSpace = 0;
+                          heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales) (fallback)";
+                           console.log("Bbox más alta que ancha (fallback), rotando 90 grados para pasadas horizontales en el espacio rotado.");
+                      }
+                  }
+                  rotationAngle = (rotationAngle % 360 + 360) % 360; // Asegurar ángulo entre 0 y 360
+                  // Aquí, si usamos fallback, necesitamos determinar sweepDirectionInRotatedSpace
+                  // basándonos en el rotationAngle para que las pasadas sean O-E (0) o S-N (1) en el espacio rotado.
+                  // Si rotationAngle está cerca de 0 o 180, sweepDirectionInRotatedSpace = 0.
+                  // Si rotationAngle está cerca de 90 o 270, sweepDirectionInRotatedSpace = 1.
+                   const angleMod90 = rotationAngle % 90;
+                   if (angleMod90 < 45 || angleMod90 > 45) { // Más cerca de 0/90/180/270
+                        if ((rotationAngle >= 315 || rotationAngle < 45) || (rotationAngle >= 135 && rotationAngle < 225)) {
+                             // Cerca de 0 o 180 -> barrido S-N en espacio rotado (pasadas O-E)
+                             sweepDirectionInRotatedSpace = 0;
+                             console.log("Fallback: Ángulo de rotación cerca de 0/180. Barrido S-N en espacio rotado.");
+                        } else {
+                             // Cerca de 90 o 270 -> barrido O-E en espacio rotado (pasadas S-N)
+                              sweepDirectionInRotatedSpace = 1;
+                              console.log("Fallback: Ángulo de rotación cerca de 90/270. Barrido O-E en espacio rotado.");
+                        }
+
+                   } else {
+                        // Si el ángulo está justo en 45/135/225/315, podemos elegir arbitrariamente, o usar el barrido que resulte en más pasadas
+                        // Para simplificar, usemos una heurística basada en la forma de la bbox rotada.
+                        console.warn("Fallback: Ángulo de rotación cerca de 45/135/225/315. Usando heurística de Bbox rotada para decidir dirección de barrido.");
+                         try {
+                              const tempRotatedBbox = turf.bbox(turf.transformRotate(parcelFeature, rotationAngle, {pivot: centroid}));
+                              const tempBboxWidth = turf.distance(turf.point([tempRotatedBbox[0], tempRotatedBbox[1]]), turf.point([tempRotatedBbox[2], tempRotatedBbox[1]]), {units: units});
+                              const tempBboxHeight = turf.distance(turf.point([tempRotatedBbox[0], tempRotatedBbox[1]]), turf.point([tempRotatedBbox[0], tempRotatedBbox[3]]), {units: units});
+                              if (tempBboxHeight >= tempBboxWidth) { // Si la bbox rotada es más alta que ancha (o igual)
+                                   // Barrido S-N en espacio rotado (pasadas O-E)
+                                   sweepDirectionInRotatedSpace = 0;
+                                    console.log("Fallback: Bbox rotada más alta que ancha. Barrido S-N en espacio rotado.");
+                              } else {
+                                   // Barrido O-E en espacio rotado (pasadas S-N)
+                                    sweepDirectionInRotatedSpace = 1;
+                                    console.log("Fallback: Bbox rotada más ancha que alta. Barrido O-E en espacio rotado.");
+                              }
+                         } catch (e) {
+                              console.error("Error calculando bbox rotada temporal para decidir dirección de barrido (fallback):", e);
+                               console.warn("Fallback: Fallo al decidir dirección de barrido. Usando S-N por defecto.");
+                              sweepDirectionInRotatedSpace = 0; // Default
+                         }
+                   }
+
+                 console.log(`Ángulo de rotación basado en heurística (fallback): ${rotationAngle.toFixed(2)}°, Dirección de barrido en espacio rotado (0=S-N, 1=O-E): ${sweepDirectionInRotatedSpace}`);
+
                 // --- Fin Lógica para determinar el ángulo de rotación ---
 
 
@@ -1654,7 +1572,7 @@
                  console.log("No hay localización conocida. Intentando iniciar/reiniciar localización...");
                  // Llamar a locateUser() intentará iniciar watchPosition si no está activo
                  locateUser();
-                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización')) {
+                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:') && !loadingStatusDiv.textContent.includes('Buscando localización') && !loadingStatusDiv.textContent.includes('Error de localización')) {
                        loadingStatusDiv.textContent += ' Buscando localización...';
                  }
             }
