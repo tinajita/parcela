@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con generación de Pasadas</title>
+    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -335,33 +335,9 @@
                       return response.json();
                  })
                  // Eliminamos la promesa del MDT
-                 /*
-                 fetch(mdtGeoTiffDataUrl).then(async response => {
-                      if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
-                       console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                       if (typeof GeoTIFF !== 'undefined') {
-                            try {
-                                const arrayBuffer = await response.arrayBuffer();
-                                const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
-                                mdtImage = await tiff.getImage();
-                                console.log("MDT (TIFF) procesado con geotiff.js. Dimensiones:", mdtImage.getWidth(), "x", mdtImage.getHeight());
-                            } catch (e) {
-                                console.error("Error al procesar MDT (TIFF) con geotiff.js:", e);
-                                return null;
-                            }
-                            return mdtImage;
-                       } else {
-                           console.error("GeoTIFF.js no está cargado. No se puede procesar el MDT.");
-                           return null;
-                       }
-                 })
-                 */
             ])
             .then(([parcelasGeojsonData, construccionesGeojsonData, elementosInternosGeojsonData, curvasNivelGeojsonData]) => { // Ajustamos los parámetros recibidos
                 console.log("Los archivos GeoJSON se cargaron con éxito.");
-                // Eliminamos el manejo de processedMdtImage aquí
-                // mdtImage = processedMdtImage;
-
 
                 // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
                 console.log("Inspeccionando y cargando capa de Parcelas...");
@@ -496,19 +472,6 @@
                        }
                  }
                 // --- Fin del código para curvas de nivel ---
-
-                 // Eliminamos el manejo de mdtImage aquí
-                 /*
-                 if (mdtImage) {
-                      console.log("MDT (TIFF) procesado y listo para usar.");
-                 } else {
-                      console.warn("MDT (TIFF) no pudo ser procesado. El cálculo de pendiente no estará disponible.");
-                      if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
-                           loadingStatusDiv.textContent += ' Advertencia: MDT TIFF no procesado.';
-                      }
-                 }
-                 */
-
 
                  console.log(`Total features de Construcciones almacenadas: ${construccionesFeatures.length}`);
                  console.log(`Total features de Elementos Internos almacenadas: ${elementosInternosFeatures.length}`);
@@ -905,17 +868,17 @@
                                  if ((cleanedArea.geometry.type === 'Polygon' || cleanedArea.geometry.type === 'MultiPolygon' || cleanedArea.geometry.type === 'GeometryCollection') && areaCalculated > 0) {
                                       if (cleanedArea.geometry.type === 'GeometryCollection') {
                                            console.warn("Área limpia resultante es GeometryCollection. Intentando consolidar para el barrido.");
-                                            let validGeomsInCleanedArea = [];
+                                            let validGeomsInGC = [];
                                             turf.geomEach(cleanedArea.geometry, function(geom) {
                                                 if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
-                                                    validGeomsInCleanedArea.push(turf.feature(geom));
+                                                    validGeomsInGC.push(turf.feature(geom));
                                                 }
                                             });
 
-                                            if (validGeomsInCleanedArea.length > 0) {
+                                            if (validGeomsInGC.length > 0) {
                                                  let consolidatedCleanArea = null;
-                                                  if (validGeomsInCleanedArea.length === 1) {
-                                                       consolidatedCleanArea = validGeomsInCleanedArea[0];
+                                                  if (validGeomsInGC.length === 1) {
+                                                       consolidatedCleanArea = validGeomsInGC[0];
                                                        console.log("GeometryCollection de área limpia consolidado es 1 polígono. Usando directamente.");
                                                   } else {
                                                        try {
@@ -1126,7 +1089,7 @@
 
 
                 let rotationAngle = 0; // Variable para almacenar el ángulo de rotación final
-                let sweepDirectionInRotatedSpace = 0; // 0 para N-S (pasadas O-E), 1 para E-W (pasadas N-S)
+                let sweepDirectionInRotatedSpace = 0; // 0 para N-S (pasadas O-E), 1 para E-W (pasadas S-N)
                 let heuristicDirectionDescription = "";
 
                 // --- Lógica para determinar el ángulo de rotación: Usar la lógica de fallback existente (sin MDT) ---
@@ -1157,7 +1120,7 @@
                   let foundLongestSegment = false;
                    if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
                       const exteriorCoords = parcelGeometry.coordinates[0];
-                      if (exteriorCoords && ArrayArray.isArray(exteriorCoords) && exteriorCoords.length > 2) {
+                      if (Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
                            let maxLength = 0;
                            let p1Longest = null;
                            let p2Longest = null;
@@ -1305,14 +1268,14 @@
                 let rotatedEndSweepCoordValue;
                 let rotatedSweepLineStartCoord;
                 let rotatedSweepLineEndCoord;
-                let rotatedSweepLineDirectionAngle; // Ángulo en el espacio rotado (0 para N, 90 para E)
+                // let rotatedSweepLineDirectionAngle; // No se usa directamente después
 
                 if (sweepDirectionInRotatedSpace === 0) {
                     rotatedStartSweepCoordValue = rotatedBboxSouth;
                     rotatedEndSweepCoordValue = rotatedBboxNorth;
                     rotatedSweepLineStartCoord = rotatedBboxWest;
                     rotatedSweepLineEndCoord = rotatedBboxEast;
-                    rotatedSweepLineDirectionAngle = 90; // Dirección de la línea de barrido en el espacio rotado (Este)
+                    // rotatedSweepLineDirectionAngle = 90; // Dirección de la línea de barrido en el espacio rotado (Este)
 
                      console.log("Barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
                 } else {
@@ -1320,7 +1283,7 @@
                     rotatedEndSweepCoordValue = rotatedBboxEast;
                      rotatedSweepLineStartCoord = rotatedBboxSouth;
                      rotatedSweepLineEndCoord = rotatedBboxNorth;
-                     rotatedSweepLineDirectionAngle = 0; // Dirección de la línea de barrido en el espacio rotado (Norte)
+                     // rotatedSweepLineDirectionAngle = 0; // Dirección de la línea de barrido en el espacio rotado (Norte)
 
                      console.log("Barrido O->E en espacio rotado para generar pasadas verticales (S->N).");
                 }
@@ -1511,7 +1474,7 @@
                    }
                });
 
-               console.log("Generación de pasadas finalizada.");
+               console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
                 console.log("--- Fin Generación de Pasadas ---");
 
            } catch (e) {
@@ -1569,7 +1532,7 @@
                        loadingStatusDiv.textContent += ' Buscando localización...';
                  }
             }
-        });
+        }
 
         function onLocationFound(e) {
             const radius = e.coords.accuracy; // Precisión del GPS en metros
