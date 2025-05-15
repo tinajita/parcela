@@ -176,6 +176,10 @@
         // Vista inicial en Andalucía (ajustada para Ronda)
         const map = L.map('map').setView([36.7462, -5.1612], 14); // Vista ajustada
 
+        // Añadir el control de zoom estándar de Leaflet (+/-)
+        // Aunque Leaflet lo añade por defecto, lo explicitamos por si acaso.
+        L.control.zoom({ position: 'topleft' }).addTo(map);
+
         // --- Variables ---
         let selectedLayer = null; // Variable para almacenar la capa (parcela) que está seleccionada
         let originalStyle = {}; // Variable para guardar el estilo original de cada capa de parcela
@@ -187,7 +191,7 @@
         window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
         let exclusionLayersLoaded = false; // Flag para saber si los datos de exclusión ya se cargaron
-        const MIN_ZOOM_FOR_POPUP = 17; // Nivel de zoom mínimo para mostrar el popup
+        const MIN_ZOOM_FOR_POPUP = 14; // Nivel de zoom mínimo para mostrar el popup (Cambiado a 14)
 
         // --- Variables para localización GPS ---
         let locationMarker = null;
@@ -249,6 +253,11 @@
         // Actualizar el indicador de zoom al cambiar el nivel de zoom
         map.on('zoomend', function() {
             zoomLevelSpan.textContent = map.getZoom();
+             // Opcional: Cerrar popup si el zoom desciende por debajo del umbral
+            if (map.getZoom() < MIN_ZOOM_FOR_POPUP && selectedLayer && selectedLayer.getPopup() && selectedLayer.getPopup().isOpen()) {
+                 selectedLayer.closePopup();
+                 console.log("Popup cerrado porque el zoom es menor que el umbral.");
+            }
         });
 
 
@@ -350,6 +359,10 @@
                                      // Mantener selección visual independientemente del zoom para el popup
                                      if (selectedLayer) {
                                          selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
+                                         // Cerrar el popup de la capa previamente seleccionada si está abierto
+                                         if (selectedLayer.getPopup() && selectedLayer.getPopup().isOpen()) {
+                                             selectedLayer.closePopup();
+                                         }
                                      }
                                      layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
                                      selectedLayer = layer;
@@ -358,9 +371,9 @@
 
                                      // Lógica para mostrar popup solo si el zoom es >= MIN_ZOOM_FOR_POPUP
                                      if (map.getZoom() >= MIN_ZOOM_FOR_POPUP) {
-                                         let popupContent = `<b>Polígono:</b> ${feature.properties.c_cdmun + feature.properties.c_cp + feature.properties.c_string}<br>`; // Ajusta según tus datos, asumo que 'c_cdmun', 'c_cp', 'c_string' forman un identificador único de parcela
-                                         // Puedes necesitar ajustar las propiedades 'Polígono' y 'Parcela' según la estructura exacta de tu GeoJSON.
-                                         popupContent += `<b>Parcela:</b> ${feature.properties.c_paraje || 'N/A'}<br>`; // Ajusta según tus datos, 'c_paraje' o similar para el nombre/número de parcela
+                                         // Simplificar contenido del popup
+                                         let popupContent = `<b>Polígono:</b> ${feature.properties.c_cdmun || 'N/A'} ${feature.properties.c_cp || 'N/A'}<br>`; // Ajusta según tus datos si c_cdmun, c_cp no son el polígono
+                                         popupContent += `<b>Parcela:</b> ${feature.properties.c_string || 'N/A'}<br>`; // Ajusta según tus datos si c_string no es la parcela
 
                                          // Calcular la cota media de las curvas de nivel que intersectan la parcela
                                          let averageContourElevation = calculateAverageContourElevation(feature);
@@ -368,12 +381,12 @@
 
                                          layer.bindPopup(popupContent).openPopup();
                                      } else {
-                                         // Si el zoom es menor, cerrar cualquier popup existente para esta capa y mostrar un mensaje (opcional)
+                                         // Si el zoom es menor, cerrar cualquier popup existente para esta capa
                                          if (layer.getPopup()) {
                                              layer.closePopup();
                                          }
-                                         // Opcional: Mostrar un mensaje temporal al usuario indicando que haga zoom para ver info
                                           console.log(`Zoom actual (${map.getZoom()}) menor que el mínimo requerido (${MIN_ZOOM_FOR_POPUP}) para mostrar el popup.`);
+                                         // Opcional: Mostrar un mensaje temporal al usuario indicando que haga zoom para ver info
                                          // alert(`Haz zoom (nivel ${MIN_ZOOM_FOR_POPUP} o superior) para ver la información detallada de la parcela.`);
                                      }
 
@@ -472,46 +485,64 @@
 
          // --- Función para calcular la cota media de las curvas de nivel que intersectan una parcela ---
          function calculateAverageContourElevation(parcelFeature) {
-             if (!curvasNivelLayer || !parcelFeature || !parcelFeature.geometry) {
-                  console.warn("curvasNivelLayer no cargado o parcela inválida. No se puede calcular la cota media.");
+             console.log("Intentando calcular cota media para parcela...");
+             if (!curvasNivelLayer || !curvasNivelLayer.getLayers || curvasNivelLayer.getLayers().length === 0) {
+                  console.warn("Capa de curvas de nivel no cargada o vacía. No se puede calcular la cota media.");
                   return null;
              }
+              if (!parcelFeature || !parcelFeature.geometry) {
+                   console.warn("Parcela inválida para calcular cota media.");
+                   return null;
+              }
 
              let intersectingElevations = [];
+             const parcelTurfFeature = turf.feature(parcelFeature.geometry); // Asegurarse de que sea un feature de Turf
 
-             // Iterar sobre cada feature en la capa de curvas de nivel
+             console.log(`Iterando sobre ${curvasNivelLayer.getLayers().length} capas de curvas de nivel para verificar intersecciones.`);
+
+             // Iterar sobre cada capa (curva de nivel) en la capa de curvas de nivel
              curvasNivelLayer.eachLayer(function(layer) {
-                 const contourFeature = layer.feature;
+                 const contourFeature = layer.feature; // Obtener el GeoJSON feature asociado a la capa Leaflet
 
                   if (contourFeature && contourFeature.geometry && contourFeature.geometry.type === 'LineString') {
                        try {
                             // Verificar si la curva de nivel intersecta la parcela seleccionada
-                           if (turf.booleanIntersects(parcelFeature, contourFeature)) {
+                           // console.log("Verificando intersección...");
+                           if (turf.booleanIntersects(parcelTurfFeature, contourFeature)) {
+                                // console.log("¡Intersección detectada!");
                                 // Intentar obtener la elevación de la curva de nivel
                                let elevation = null;
-                               if (contourFeature.properties.hasOwnProperty('ELEVACION')) {
-                                   elevation = parseFloat(contourFeature.properties.ELEVACION);
-                               } else if (contourFeature.properties.hasOwnProperty('valor')) {
-                                   elevation = parseFloat(contourFeature.properties.valor);
-                               } else if (contourFeature.properties.hasOwnProperty('altura')) {
-                                    elevation = parseFloat(contourFeature.properties.altura);
+                               if (contourFeature.properties) { // Asegurarse de que existen las propiedades
+                                   if (contourFeature.properties.hasOwnProperty('ELEVACION')) {
+                                       elevation = parseFloat(contourFeature.properties.ELEVACION);
+                                   } else if (contourFeature.properties.hasOwnProperty('valor')) {
+                                       elevation = parseFloat(contourFeature.properties.valor);
+                                   } else if (contourFeature.properties.hasOwnProperty('altura')) {
+                                        elevation = parseFloat(contourFeature.properties.altura);
+                                   }
                                }
+
 
                                if (elevation !== null && !isNaN(elevation)) {
                                    intersectingElevations.push(elevation);
+                                   // console.log(`Elevación encontrada y añadida: ${elevation}`);
                                } else {
-                                   console.warn("Curva de nivel intersecta la parcela, pero no tiene una propiedad de elevación numérica válida.", contourFeature.properties);
+                                    // console.warn("Curva de nivel intersecta la parcela, pero no tiene una propiedad de elevación numérica válida ('ELEVACION', 'valor', 'altura'). Propiedades:", contourFeature.properties);
                                }
+                           } else {
+                                // console.log("No hay intersección.");
                            }
                        } catch (e) {
-                           console.warn("Error durante la verificación de intersección de curva de nivel:", e);
+                           console.warn("Error durante la verificación de intersección o procesamiento de curva de nivel:", contourFeature, e);
                        }
                   } else {
-                       console.warn("Feature de curva de nivel no es un LineString válido. Se omite.", contourFeature);
+                       // console.warn("Feature de curva de nivel no es un LineString válido. Se omite.", contourFeature);
                   }
              });
 
              console.log(`Encontradas ${intersectingElevations.length} elevaciones de curvas de nivel que intersectan la parcela.`);
+             console.log("Elevaciones intersectantes:", intersectingElevations);
+
 
              if (intersectingElevations.length > 0) {
                  const sum = intersectingElevations.reduce((acc, val) => acc + val, 0);
@@ -519,8 +550,8 @@
                  console.log(`Cota media de curvas de nivel para la parcela: ${average.toFixed(2)} m`);
                  return average;
              } else {
-                  console.log("Ninguna curva de nivel intersecta la parcela seleccionada.");
-                  return null; // No se encontraron curvas de nivel que intersecten
+                  console.log("Ninguna curva de nivel intersecta la parcela seleccionada o no se pudo extraer elevación válida.");
+                  return null; // No se encontraron curvas de nivel que intersecten o no se pudo extraer elevación válida
              }
          }
 
@@ -947,7 +978,7 @@
                                                         }
                                                    }
 
-                                                   if (consolidatedCleanArea && consolidatedCleanArea.geometry && (consolidatedCleanArea.geometry.type === 'Polygon' || consolidatedCleanArea.geometry.type === 'MultiPolygon')) {
+                                                   if (consolidatedCleanArea && consolidatedCleanArea.geometry && (consolidatedCleanArea.geometry.type === 'Polygon' || consolidatedConsolidated) {
                                                        geometryForCalculations = consolidatedCleanArea.geometry;
                                                         console.log("Área limpia (parcela - exclusiones) consolidada a:", geometryForCalculations.type, ". Usando para cálculos.");
                                                    } else {
