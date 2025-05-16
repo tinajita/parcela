@@ -296,7 +296,7 @@
             try {
                 // Obtener la imagen del GeoTIFF (asumiendo que es la primera imagen)
                 const image = await geoTiff.getImage();
-                const geoKeys = image.getGeoKeys();
+                // const geoKeys = image.getGeoKeys(); // Eliminado: parece no estar disponible en esta versión/objeto
                 const boundingBox = image.getBoundingBox(); // [west, south, east, north]
                 const width = image.getWidth();
                 const height = image.getHeight();
