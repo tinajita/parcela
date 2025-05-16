@@ -422,6 +422,7 @@
 
             console.log(`[${parcelId}] Fin del bucle de pendiente. Curvas que intersectan con datos válidos: ${intersectingContoursCount}`);
 
+            // Se necesitan al menos 2 puntos de elevación para tener un rango (mínima y máxima)
             if (intersectingContoursCount < 2 || minElevation === Infinity || maxElevation === -Infinity) {
                  console.log(`[${parcelId}] Menos de 2 curvas de nivel con datos válidos intersectan la parcela. No se puede calcular la pendiente.`);
                 return { min: 'N/A', max: 'N/A', slope: 'N/A (Sin suficientes curvas)' };
@@ -447,6 +448,7 @@
 
 
             let slopePercentage = 'N/A';
+            // Calcula la pendiente solo si la distancia horizontal es mayor que cero para evitar división por cero
             if (horizontalDistance > 0) {
                  slopePercentage = (elevationDifference / horizontalDistance) * 100;
                  console.log(`[${parcelId}] Pendiente calculada: ${slopePercentage.toFixed(2)} %`);
@@ -602,8 +604,7 @@
                                      console.log("Parcela seleccionada:", feature.properties);
 
                                      // Check if zoom level is 14 or higher before showing popup
-                                     // and if parcelasLayer was successfully loaded
-                                     if (map.getZoom() >= 14 && parcelasLayer) {
+                                     if (map.getZoom() >= 14) {
                                          // Build popup content
                                          let popupContent = '<b>Parcela Seleccionada:</b><br>';
                                          let poligono = feature.properties['MASA'] || feature.properties['poligono'] || 'N/A'; // Assuming 'MASA' or 'poligono' for poligono
@@ -622,17 +623,13 @@
                                           popupContent += `Altitud Máxima (aprox): ${slopeInfo.max} m<br>`;
                                           popupContent += `Pendiente Estimada: ${slopeInfo.slope} %<br>`;
 
-
                                           // Calculate and add area in hectares
                                           const areaHa = calculateAreaInHectares(feature.geometry);
                                           popupContent += `Área: ${areaHa} Ha`;
 
                                          layer.bindPopup(popupContent).openPopup();
 
-                                     } else if (!parcelasLayer) {
-                                          console.warn("Parcelas layer not loaded. Cannot show parcel info.");
-                                     }
-                                      else {
+                                     } else {
                                           // If zoom is too low, just select the layer visually but don't show popup
                                           console.log("Zoom level too low to show parcel info popup. Zoom >= 14 required.");
                                           // Optionally, you could bind a simple popup explaining the zoom requirement,
@@ -1009,9 +1006,9 @@
                   } else { // simplifiedExclusionFeatures.length > 1
                        console.log(`Más de 1 feature de exclusión simplificada (${simplifiedExclusionFeatures.length}). Calculando unión...`);
                       try {
-                          console.log("Input (STRINGIFIED) para turf.union:", JSON.stringify(simplifiedExclusionFeatures));
+                          // console.log("Input (STRINGIFIED) para turf.union:", JSON.stringify(simplifiedExclusionFeatures)); // Puede ser muy grande
                           unionOfExclusions = turf.union(...simplifiedExclusionFeatures);
-                          console.log("Resultado (STRINGIFIED) de turf.union:", JSON.stringify(unionOfExclusions));
+                          // console.log("Resultado (STRINGIFIED) de turf.union:", JSON.stringify(unionOfExclusions)); // Puede ser muy grande
 
                           if (unionOfExclusions && unionOfExclusions.geometry) {
                               if (unionOfExclusions.geometry.type === 'Polygon' || unionOfExclusions.geometry.type === 'MultiPolygon' || unionOfExclusions.geometry.type === 'GeometryCollection') {
@@ -1571,10 +1568,10 @@
 
                         let fullSweepLineInRotatedSpace = null;
                          try {
-                            if (sweepDirectionInRotatedSpace === 0) {
-                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCoordValue]]); // Fixed typo passCoordValue
-                            } else {
-                                 fullSweepLineInRotatedSpace = turf.lineString([[passCoordValue, rotatedBboxSouth], [passCoordValue, rotatedBboxNorth]]);
+                            if (sweepDirectionInRotatedSpace === 0) { // Pasada horizontal (Oeste a Este) - CORREGIDO passCoordValue a passCenterCoord
+                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
+                            } else { // Pasada vertical (Sur a Norte) - CORREGIDO passCoordValue a passCenterCoord
+                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
                             }
                          } catch(e) {
                               console.error("Error en turf.lineString al crear línea de barrido completa:", e);
