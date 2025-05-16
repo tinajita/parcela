@@ -294,11 +294,11 @@
         }
 
         // Función para verificar si una geometría está cubierta por un MDT
-        function isGeometryCoveredByMDT(geometry, mdtGeoTiff) {
+        async function isGeometryCoveredByMDT(geometry, mdtGeoTiff) { // Made async
              if (!geometry || !mdtGeoTiff) return false;
 
              try {
-                  const image = mdtGeoTiff.getImage();
+                  const image = await mdtGeoTiff.getImage(); // Added await
                   const mdtBoundingBox = image.getBoundingBox(); // [west, south, east, north] en ETRS89 UTM 30N
 
                   const parcelBboxWgs84 = turf.bbox(geometry); // Bbox de la parcela en WGS84
@@ -322,14 +322,14 @@
         }
 
         // Función para encontrar el primer MDT cargado que cubre la geometría de la parcela
-        function findCoveringMDT(parcelGeometry, mdtGeoTiffsArray) {
+        async function findCoveringMDT(parcelGeometry, mdtGeoTiffsArray) { // Made async
              if (!parcelGeometry || !mdtGeoTiffsArray || mdtGeoTiffsArray.length === 0) {
                   console.warn("No hay MDTs cargados o geometría de parcela inválida para encontrar MDT de cobertura.");
                   return null;
              }
 
              for (const mdt of mdtGeoTiffsArray) {
-                  if (mdt && isGeometryCoveredByMDT(parcelGeometry, mdt)) {
+                  if (mdt && await isGeometryCoveredByMDT(parcelGeometry, mdt)) { // Added await
                        console.log("Encontrado MDT de cobertura para la parcela.");
                        return mdt; // Retorna el primer MDT que cubre la parcela
                   }
@@ -802,7 +802,7 @@
                                           let usedMethod = "Curvas Nivel"; // Método por defecto
 
                                           // Intentar encontrar un MDT que cubra la parcela
-                                          const coveringMdt = findCoveringMDT(feature.geometry, mdtGeoTiffs);
+                                          const coveringMdt = await findCoveringMDT(feature.geometry, mdtGeoTiffs); // Added await
 
                                           if (coveringMdt) {
                                                loadingStatusDiv.textContent = 'Calculando altitud/pendiente con MDT...';
@@ -897,7 +897,7 @@
 
         // --- LÓGICA PARA GENERAR PASADAS OPTIMIZADAS USANDO TURF.JS ---
 
-        generarPasadasBtn.addEventListener('click', function() {
+        generarPasadasBtn.addEventListener('click', async function() { // Made async
 
             // --- VERIFICACIÓN DE TURF ---
             console.log("Estado de 'turf' al hacer clic en Generar Pasadas:", typeof turf);
@@ -931,17 +931,18 @@
                  const units = 'meters';
                  const bufferDistanceForLines = 2;
 
-                 Promise.all([
-                     fetch(construccionesGeojsonDataUrl).then(response => {
-                         if (!response.ok) throw new Error(`Error al cargar Construcciones: ${response.statusText}`);
-                         return response.json();
-                     }),
-                     fetch(elementosInternosGeojsonDataUrl).then(response => {
-                         if (!response.ok) throw new Error(`Error al cargar Elementos Internos: ${response.statusText}`);
-                         return response.json();
-                     })
-                 ])
-                 .then(([construccionesGeojsonData, elementosInternosGeojsonData]) => {
+                 try { // Added try-catch for exclusion data loading
+                     const [construccionesGeojsonData, elementosInternosGeojsonData] = await Promise.all([ // Added await
+                         fetch(construccionesGeojsonDataUrl).then(response => {
+                             if (!response.ok) throw new Error(`Error al cargar Construcciones: ${response.statusText}`);
+                             return response.json();
+                         }),
+                         fetch(elementosInternosGeojsonDataUrl).then(response => {
+                             if (!response.ok) throw new Error(`Error al cargar Elementos Internos: ${response.statusText}`);
+                             return response.json();
+                         })
+                     ]);
+
                      console.log("Archivos de exclusión CONSTRU.json y ELEMLIN.json cargados.");
 
                      window.exclusionFeatures = []; // Limpiar por si acaso, aunque debería estar vacío
@@ -1025,8 +1026,7 @@
                      // Continuar con la generación de pasadas ahora que los datos de exclusión están cargados
                      generatePassesLogic();
 
-                 })
-                 .catch(error => {
+                 } catch(error) { // Catch errors from the Promise.all fetch
                      console.error("Error durante la carga de datos de exclusión:", error);
                      loadingStatusDiv.textContent = `Error al cargar datos de exclusión: ${error.message}`;
                      alert(`Ocurrió un error al cargar los archivos de exclusión. No se generarán pasadas con exclusiones. Revisa la consola para más detalles. Error: ${error.message}`);
@@ -1034,8 +1034,8 @@
                      window.exclusionFeatures = []; // Asegurar que esté vacío si hubo error
                      exclusionLayersLoaded = true; // Marcar como cargado para no intentar de nuevo
                      generatePassesLogic(); // Intentar generar pasadas sin exclusiones
+                 }
 
-                 });
 
              } else {
                   // Si los datos de exclusión ya se cargaron, simplemente continuar con la lógica de generación
@@ -1073,7 +1073,7 @@
              let usedSlopeSource = "Curvas Nivel"; // Por defecto
 
              // Intentar encontrar un MDT que cubra la parcela para el cálculo de pendiente
-             const coveringMdtForSlope = findCoveringMDT(selectedLayer.feature.geometry, mdtGeoTiffs);
+             const coveringMdtForSlope = await findCoveringMDT(selectedLayer.feature.geometry, mdtGeoTiffs); // Added await
 
              if (coveringMdtForSlope) {
                   loadingStatusDiv.textContent = 'Calculando pendiente con MDT para orientación de pasadas...';
@@ -1929,7 +1929,7 @@
                      console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
                 }
                  if (typeof finalGeometryToSweep !== 'undefined') {
-                     console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryForCalculations)); // Corregido: usar geometryForCalculations si finalGeometryToSweep es null/undefined
+                     console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryToSweep));
                 }
                  if (typeof geometryForSweepAndPiP !== 'undefined') {
                       console.error("Geometry For Sweep And PiP (polígono más grande):", JSON.stringify(geometryForSweepAndPiP));
