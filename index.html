@@ -206,7 +206,7 @@
          });
 
         // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgiconline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+         const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
              attribution: 'Esri, Garmin, FAO, NOAA, USGS',
              maxZoom: 17,
              transparent: true
@@ -1233,7 +1233,6 @@
 
                  const useLongestSideThreshold = 0.7;
                  let originalParcelBbox = null;
-                 let originalBboxWest = 0, originalBboxSouth = 0, originalBboxEast = 0, originalBboxNorth = 0; // Variables para la bbox original
                  let originalBboxWidthMeters = 0;
                  let originalBboxHeightMeters = 0;
                  let originalParcelArea = 0;
@@ -1248,7 +1247,6 @@
                        if (!originalParcelBbox || !Array.isArray(originalParcelBbox) || originalParcelBbox.length !== 4) {
                            console.warn("turf.bbox devolvió un resultado inválido para parcelGeometry:", originalParcelBbox);
                            // Establecer valores predeterminados si el bbox no es válido
-                           originalBboxWest = 0; originalBboxSouth = 0; originalBboxEast = 0; originalBboxNorth = 0;
                            originalBboxWidthMeters = 0;
                            originalBboxHeightMeters = 0;
                            originalBboxArea = 0;
@@ -1270,13 +1268,8 @@
 
                        } else {
                            // Si el bbox es válido, calcular las dimensiones y rectangularidad
-                           originalBboxWest = originalParcelBbox[0];
-                           originalBboxSouth = originalParcelBbox[1];
-                           originalBboxEast = originalParcelBbox[2];
-                           originalBboxNorth = originalParcelBbox[3];
-
-                            originalBboxWidthMeters = turf.distance(turf.point([originalBboxWest, originalBboxSouth]), turf.point([originalBboxEast, originalBboxSouth]), {units: units});
-                            originalBboxHeightMeters = turf.distance(turf.point([originalBboxWest, originalBboxSouth]), turf.point([originalBboxWest, originalBboxNorth]), {units: units});
+                            originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
+                            originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
                             originalParcelArea = turf.area(turf.feature(parcelGeometry)); // Calcular área de la parcela
                             originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
                             originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
@@ -1307,7 +1300,6 @@
                   } catch(e) {
                        console.error("Error general o de Turf.js durante el cálculo de Bbox o Rectangularidad de la parcela original:", e);
                        // En caso de cualquier otro error durante el cálculo, usar valores predeterminados
-                       originalBboxWest = 0; originalBboxSouth = 0; originalBboxEast = 0; originalBboxNorth = 0;
                        originalBboxWidthMeters = 0;
                        originalBboxHeightMeters = 0;
                        originalBboxArea = 0;
@@ -1429,9 +1421,9 @@
                   } catch(e) {
                       console.error("Error calculando distancias de la bbox rotada:", e);
                        alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                       loadingStatusDiv.textContent = 'Error calculando límites.';
+                       loadingStatusDiv.textContent = 'Error calculando distancias.';
                        generarPasadasBtn.disabled = false;
-                      return; // Detener si hay error
+                      return;
                   }
 
 
@@ -1453,7 +1445,7 @@
                 } else {
                      // Barrer a través de la dimensión perpendicular con un paso igual al ancho de trabajo
                      // Añadimos un pequeño margen para asegurarnos de cubrir toda la extensión
-                     const sweepLimit = totalSweepExtentMeters + (workingWidth / 2); // Ajustado para barrer un poco más allá del final
+                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1); // Ajustado para barrer un poco más allá del final
 
 
                      // Determinar el punto de inicio del barrido
