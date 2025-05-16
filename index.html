@@ -376,7 +376,7 @@
 
 
             // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
+            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/PARCELA.json'; // URL DE PARCELAS (seleccionable)
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
@@ -966,7 +966,7 @@
                                                    } else {
                                                         try {
                                                              consolidatedCleanArea = turf.union(...validGeomsInCleanedArea);
-                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanarea.geometry.type : 'null/undefined');
+                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanArea.geometry.type : 'null/undefined');
                                                         } catch(e) {
                                                              console.error("Error al consolidar GeometryCollection resultante de difference:", e);
                                                               console.warn("Error procesando el área limpia compleja. Devolviendo null.");
