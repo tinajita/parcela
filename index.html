@@ -206,7 +206,7 @@
          });
 
         // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+         const esriOverlayLabels = L.tileLayer('https://services.arcgiconline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
              attribution: 'Esri, Garmin, FAO, NOAA, USGS',
              maxZoom: 17,
              transparent: true
@@ -399,15 +399,15 @@
                       return response;
                  })
             ])
-            .then(([parcelasGeojsonData, curvasNivelGeoJSONData, mdtTiffResponse]) => {
+            .then(([parcelasGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => {
                 console.log("Los archivos Parcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
-                  if (curvasNivelGeoJSONData && curvasNivelGeoJSONData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeoJSONData.features)) {
+                  if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
                        // Store the GeoJSON data globally or accessible for calculation
-                       window.curvasNivelGeoJSONData = curvasNivelGeoJSONData; // Make it accessible for calculation
-                       curvasNivelLayer = L.geoJSON(curvasNivelGeoJSONData, {
+                       window.curvasNivelGeoJSONData = curvasNivelGeojsonData; // Make it accessible for calculation
+                       curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
                            style: function(feature) {
                                 return {
                                     color: '#a0522d',
@@ -420,10 +420,10 @@
                            // onEachFeature: function(feature, layer) { ... } is removed
                        }).addTo(map);
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
-                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeoJSONData.features.length}.`);
+                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeoJSONData);
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
@@ -1239,81 +1239,41 @@
                  let originalBboxArea = 0;
                  let originalRectangularity = 0;
 
-                 // --- Inicio del bloque try/catch mejorado para el cálculo de la Bbox original ---
                   try {
                        originalParcelBbox = turf.bbox(parcelGeometry);
+                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
+                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
+                       originalParcelArea = turf.area(turf.feature(parcelGeometry));
+                       originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
+                       originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
 
-                       // --- Comprobación de la validez del resultado de turf.bbox ---
-                       if (!originalParcelBbox || !Array.isArray(originalParcelBbox) || originalParcelBbox.length !== 4) {
-                           console.warn("turf.bbox devolvió un resultado inválido para parcelGeometry:", originalParcelBbox);
-                           // Establecer valores predeterminados si el bbox no es válido
-                           originalBboxWidthMeters = 0;
-                           originalBboxHeightMeters = 0;
-                           originalBboxArea = 0;
-                           originalRectangularity = 0;
-                            // Intentar calcular el área de la parcela incluso si el bbox falla
-                           try {
-                               originalParcelArea = turf.area(turf.feature(parcelGeometry));
-                           } catch(areaError) {
-                               console.error("Error calculando área de la parcela:", areaError);
-                               originalParcelArea = 0;
-                           }
-
-                           // Configurar la heurística de orientación a un valor predeterminado si el bbox falla
-                           rotationAngle = 0;
-                           sweepDirectionInRotatedSpace = 0;
-                           heuristicDirectionDescription = "Error calculando Bbox original para heurística. Usando rotación por defecto (0°).";
-                           console.log(heuristicDirectionDescription);
-                           foundLongestSegment = false; // La heurística del lado más largo depende de bbox/rectangularidad válida
-
-                       } else {
-                           // Si el bbox es válido, calcular las dimensiones y rectangularidad
-                            originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                            originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
-                            originalParcelArea = turf.area(turf.feature(parcelGeometry)); // Calcular área de la parcela
-                            originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
-                            originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
-
-                            console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
-
-                            // --- Lógica heurística existente para determinar la orientación ---
-                            if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
-                                rotationAngle = -longestSegmentAngle;
-                                sweepDirectionInRotatedSpace = 0;
-                                heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
-                                console.log("Heurística: Usando el lado más largo como dirección principal.");
-                            } else {
-                                console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
-                                if (originalBboxWidthMeters >= originalBboxHeightMeters) {
-                                    rotationAngle = 0;
-                                    sweepDirectionInRotatedSpace = 0;
-                                    heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
-                                } else {
-                                    rotationAngle = 90;
-                                    sweepDirectionInRotatedSpace = 0;
-                                    heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)";
-                                    console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
-                                }
-                            }
-                       }
+                       console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
 
                   } catch(e) {
-                       console.error("Error general o de Turf.js durante el cálculo de Bbox o Rectangularidad de la parcela original:", e);
-                       // En caso de cualquier otro error durante el cálculo, usar valores predeterminados
-                       originalBboxWidthMeters = 0;
-                       originalBboxHeightMeters = 0;
-                       originalBboxArea = 0;
-                       originalRectangularity = 0;
-                       originalParcelArea = 0; // También establecer a 0 si hay error
-                       rotationAngle = 0;
-                       sweepDirectionInRotatedSpace = 0;
-                       heuristicDirectionDescription = `Error grave calculando Bbox original: ${e.message}. Usando rotación por defecto (0°).`;
-                       console.error(heuristicDirectionDescription);
-                       foundLongestSegment = false; // Asegurarse de que la heurística del lado largo no se use
-
-                       alert("Advertencia: Ocurrió un error inesperado al procesar la geometría de la parcela para la orientación. Se usará una orientación por defecto. Revisa la consola.");
+                       console.error("Error calculando Bbox o Rectangularidad de la parcela original:", e);
                   }
-                 // --- Fin del bloque try/catch mejorado ---
+
+
+
+                 if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
+                     rotationAngle = -longestSegmentAngle;
+                     sweepDirectionInRotatedSpace = 0;
+                     heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
+                      console.log("Heurística: Usando el lado más largo como dirección principal.");
+
+                 } else {
+                     console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
+                     if (originalBboxWidthMeters >= originalBboxHeightMeters) {
+                         rotationAngle = 0;
+                         sweepDirectionInRotatedSpace = 0;
+                         heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
+                     } else {
+                         rotationAngle = 90;
+                         sweepDirectionInRotatedSpace = 0;
+                         heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)";
+                          console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
+                     }
+                 }
 
 
                  console.log(`Dirección heurística elegida: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
@@ -1329,9 +1289,8 @@
 
                   let rotatedGeometryForSweepAndPiP = null;
                   try {
-                       // Usamos geometryForCalculations (el área limpia) para la rotación
                        rotatedGeometryForSweepAndPiP = turf.transformRotate(geometryForCalculations, rotationAngle, {pivot: centroid});
-                        console.log("Geometría LIMPIA, SIMPLIFICADA (si aplica) y ROTADA para barrido/PiP:", JSON.stringify(rotatedGeometryForSweepAndPiP));
+                        console.log("Geometría LIMPIA, SIMPLIFICADA y ROTADA para barrido/PiP:", JSON.stringify(rotatedGeometryForSweepAndPiP));
                   } catch(e) {
                        console.error("Error al rotar la geometría final para el barrido:", e);
                         alert("Error al rotar la geometría para generar pasadas.");
@@ -1344,76 +1303,59 @@
                   let rotatedGeometryBbox = null;
                   let rotatedBboxWest = 0, rotatedBboxSouth = 0, rotatedBboxEast = 0, rotatedBboxNorth = 0;
 
-                  // Calculamos la bbox de la geometría ROTADA para determinar los límites del barrido
                   try {
                        rotatedGeometryBbox = turf.bbox(rotatedGeometryForSweepAndPiP);
-
-                       if (!rotatedGeometryBbox || !Array.isArray(rotatedGeometryBbox) || rotatedGeometryBbox.length !== 4) {
-                           console.error("turf.bbox devolvió un resultado inválido para la geometría ROTADA:", rotatedGeometryBbox);
-                           alert("Error: No se pudieron obtener límites válidos de la geometría rotada para generar pasadas.");
-                           loadingStatusDiv.textContent = 'Error calculando límites rotados.';
-                           generarPasadasBtn.disabled = false;
-                           return; // Detener si la bbox rotada no es válida
-                       }
-
                        rotatedBboxWest = rotatedGeometryBbox[0];
                        rotatedBboxSouth = rotatedGeometryBbox[1];
                        rotatedBboxEast = rotatedGeometryBbox[2];
                        rotatedBboxNorth = rotatedGeometryBbox[3];
-
                   } catch(e) {
                        console.error("Error calculando Bbox de la geometría rotada:", e);
                         alert("Error calculando límites de la geometría rotada para generar pasadas.");
                         loadingStatusDiv.textContent = 'Error calculando límites.';
                         generarPasadasBtn.disabled = false;
-                       return; // Detener si hay error al calcular la bbox rotada
+                       return;
                   }
 
 
                  let rotatedStartSweepCoordValue;
                  let rotatedEndSweepCoordValue;
-                 let rotatedSweepLineStartCoord; // Coordenada de inicio de la línea de barrido perpendicular
-                 let rotatedSweepLineEndCoord;   // Coordenada de fin de la línea de barrido perpendicular
-                 let rotatedSweepLineDirection;  // Dirección de la línea de barrido perpendicular (0 para N, 90 para E)
+                 let rotatedSweepLineStartCoord;
+                 let rotatedSweepLineEndCoord;
+                 let rotatedSweepLineDirection;
 
 
-                 if (sweepDirectionInRotatedSpace === 0) { // Barrido N-S en espacio rotado (para pasadas O-E)
-                     rotatedStartSweepCoordValue = rotatedBboxSouth; // Empezar desde el sur de la bbox rotada
-                     rotatedEndSweepCoordValue = rotatedBboxNorth;   // Terminar en el norte de la bbox rotada
-                     rotatedSweepLineStartCoord = rotatedBboxWest;   // Las líneas de barrido irán de Oeste a Este
-                     rotatedSweepLineEndCoord = rotatedBboxEast;     // Las líneas de barrido irán de Oeste a Este
-                     rotatedSweepLineDirection = 90;                 // La dirección de la línea de barrido es Este (90°)
+                 if (sweepDirectionInRotatedSpace === 0) {
+                     rotatedStartSweepCoordValue = rotatedBboxSouth;
+                     rotatedEndSweepCoordValue = rotatedBboxNorth;
+                     rotatedSweepLineStartCoord = rotatedBboxWest;
+                     rotatedSweepLineEndCoord = rotatedBboxEast;
+                     rotatedSweepLineDirection = 90;
 
-                     console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
-                 } else { // Barrido O-E en espacio rotado (para pasadas N-S)
-                     rotatedStartSweepCoordValue = rotatedBboxWest; // Empezar desde el oeste de la bbox rotada
-                     rotatedEndSweepCoordValue = rotatedBboxEast;   // Terminar en el este de la bbox rotada
-                     rotatedSweepLineStartCoord = rotatedBboxSouth; // Las líneas de barrido irán de Sur a Norte
-                     rotatedSweepLineEndCoord = rotatedBboxNorth;   // Las líneas de barrido irán de Sur a Norte
-                     rotatedSweepLineDirection = 0;                 // La dirección de la línea de barrido es Norte (0°)
+                      console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
+                 } else {
+                     rotatedStartSweepCoordValue = rotatedBboxWest;
+                     rotatedEndSweepCoordValue = rotatedBboxEast;
+                      rotatedSweepLineStartCoord = rotatedBboxSouth;
+                      rotatedSweepLineEndCoord = rotatedBboxNorth;
+                      rotatedSweepLineDirection = 0;
 
-                     console.log("Configurando barrido O->E en espacio rotado para generar pasadas verticales (S->N).");
+                      console.log("Configurando barrido O->E en espacio rotado para generar pasadas verticales (S->N).");
                  }
 
                  let totalSweepExtentMeters = 0;
                  let passLengthMeters = 0;
                   try {
-                      // La extensión total del barrido es la longitud de la dimensión de la bbox perpendicular a la dirección de las pasadas.
-                      // Si sweepDirectionInRotatedSpace es 0 (pasadas horizontales), el barrido es S-N (usamos altura de la bbox).
-                      // Si sweepDirectionInRotatedSpace es 1 (pasadas verticales), el barrido es O-E (usamos ancho de la bbox).
                       totalSweepExtentMeters = turf.distance(
-                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]), // Punto de inicio (esquina inf-izq de la bbox rotada)
-                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxNorth] : [rotatedBboxEast, rotatedBboxSouth]),   // Punto final (esquina inf-dch o sup-izq de la bbox rotada)
+                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
+                         turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxNorth] : [rotatedBboxEast, rotatedBboxSouth]),
                          {units: units}
                       );
                       console.log(`Extensión total del barrido en espacio rotado (a lo largo de la Bbox perpendicular a las pasadas): ${totalSweepExtentMeters.toFixed(2)} ${units}`);
 
-                      // passLengthMeters es la longitud de la dimensión de la bbox en la dirección de las pasadas.
-                      // Si sweepDirectionInRotatedSpace es 0 (pasadas horizontales), la longitud es el ancho de la bbox.
-                      // Si sweepDirectionInRotatedSpace es 1 (pasadas verticales), la longitud es el alto de la bbox.
                       passLengthMeters = turf.distance(
-                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]), // Punto de inicio
-                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxEast, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxNorth]), // Punto final (esquina inf-dch o sup-izq de la bbox rotada)
+                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
+                           turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxEast, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxNorth]),
                            {units: units}
                        );
                        console.log(`Longitud máxima esperada de las pasadas en espacio rotado: ${passLengthMeters.toFixed(2)} ${units}`);
@@ -1428,8 +1370,8 @@
 
 
                 let rotatedCurrentOffset = workingWidth / 2;
-                const samplingDistance = 1; // Distancia de muestreo a lo largo de cada línea de pasada potencial
-                const geometryForPiPCheck = rotatedGeometryForSweepAndPiP; // Usar la geometría rotada para la comprobación PiP
+                const samplingDistance = 1;
+                const geometryForPiPCheck = rotatedGeometryForSweepAndPiP;
 
                 console.log(`Generando pasadas de ${workingWidth}m en espacio rotado (muestreo de ${samplingDistance}m).`);
 
@@ -1443,52 +1385,38 @@
                      generarPasadasBtn.disabled = false;
                     return;
                 } else {
-                     // Barrer a través de la dimensión perpendicular con un paso igual al ancho de trabajo
-                     // Añadimos un pequeño margen para asegurarnos de cubrir toda la extensión
-                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1); // Ajustado para barrer un poco más allá del final
-
-
-                     // Determinar el punto de inicio del barrido
-                     const sweepStartPoint = turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]); // Esquina inferior izquierda de la bbox rotada
-
-
-                     // Bucle para generar pasadas
+                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
                      while (rotatedCurrentOffset <= sweepLimit ) {
 
-                        // Calcular el punto en el eje de barrido para el centro de la pasada actual
                         let pointOnSweepAxis = null;
                          try {
-                             // Moverse desde el punto de inicio del barrido la distancia del offset actual en la dirección del barrido
                              pointOnSweepAxis = turf.destination(
-                                 sweepStartPoint,
-                                 rotatedCurrentOffset / 1000, // turf.destination espera distancia en kilómetros
-                                 sweepDirectionInRotatedSpace, // Dirección del barrido (0 para N, 90 para E)
+                                 turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
+                                 rotatedCurrentOffset / 1000,
+                                 sweepDirectionInRotatedSpace,
                                  {units: 'kilometers'}
                              );
                          } catch(e) {
                              console.error("Error en turf.destination al calcular punto en eje de barrido:", e);
-                             // Si hay error, simplemente pasamos a la siguiente pasada
                              rotatedCurrentOffset += workingWidth;
                              continue;
                          }
 
-                         // Verificar que el punto calculado es válido
                          if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
-                              console.warn("turf.destination devolvió un punto inválido en el eje de barrido. Saltando esta pasada.");
+                              console.warn("turf.destination devolvió un punto inválido. Saltando esta pasada.");
                               rotatedCurrentOffset += workingWidth;
                               continue;
                          }
 
-                        // Obtener la coordenada relevante (latitud o longitud) del centro de la pasada en el espacio rotado
+
                         let passCenterCoord = sweepDirectionInRotatedSpace === 0 ? pointOnSweepAxis.geometry.coordinates[1] : pointOnSweepAxis.geometry.coordinates[0];
 
 
-                        // Crear una línea que atraviese toda la bbox rotada en la posición del centro de la pasada
                         let fullSweepLineInRotatedSpace = null;
                          try {
-                            if (sweepDirectionInRotatedSpace === 0) { // Pasadas horizontales (Oeste a Este)
+                            if (sweepDirectionInRotatedSpace === 0) {
                                  fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
-                            } else { // Pasadas verticales (Sur a Norte)
+                            } else {
                                  fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
                             }
                          } catch(e) {
@@ -1504,7 +1432,6 @@
                           }
 
 
-                        // Calcular la longitud de esta línea de barrido completa
                         let lineLength = 0;
                          try {
                               lineLength = turf.length(fullSweepLineInRotatedSpace, {units: units});
@@ -1515,72 +1442,59 @@
                          }
 
 
-                        let currentSegmentPoints = []; // Puntos que forman los segmentos de pasada dentro de la geometría limpia
+                        let currentSegmentPoints = [];
 
-                        // Muestrear puntos a lo largo de la línea de barrido completa
                         for (let i = 0; i <= lineLength; i += samplingDistance) {
                             let point = null;
                             try {
-                                // Obtener un punto a lo largo de la línea de barrido completa
                                 point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
                             } catch(e) {
-                                console.warn(`Error en turf.along al muestrear punto a distancia ${i} ${units}.`, e);
-                                continue; // Saltar este punto si hay error
+                                console.warn("Error en turf.along al muestrear punto.", i, e);
+                                continue;
                             }
 
-                            // Verificar que el punto muestreado es válido
                             if (!point || !point.geometry || !point.geometry.coordinates) {
-                                 console.warn(`turf.along a distancia ${i} ${units} devolvió punto inválido. Saltando punto.`);
-                                 continue; // Saltar este punto si es inválido
+                                 console.warn(`turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
+                                 continue;
                             }
 
-                            // Comprobar si el punto muestreado está DENTRO de la geometría limpia (parcela - exclusiones)
+
                             let isInside = false;
                             if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
                                 try {
                                     isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
                                 } catch(e) {
                                     console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
-                                    isInside = false; // Si hay error, asumir que no está dentro
+                                    isInside = false;
                                 }
                             } else {
-                                // Si la geometría de comprobación no es válida, no podemos determinar si el punto está dentro
-                                // Esto no debería ocurrir si la lógica anterior funciona, pero es una salvaguarda
                                 console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
                                 isInside = false;
                             }
 
 
                             if (isInside && point && point.geometry && point.geometry.coordinates) {
-                                // Si el punto está dentro y es válido, añadirlo al segmento actual
                                 currentSegmentPoints.push(point.geometry.coordinates);
                             } else {
-                                // Si el punto no está dentro (o es inválido), el segmento actual termina aquí
-                                // Si el segmento tiene al menos 2 puntos, es una pasada válida, la guardamos
                                 if (currentSegmentPoints.length > 1) {
                                      try {
-                                         // Crear un LineString con los puntos del segmento
                                          generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                                      } catch(e) {
                                          console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
                                      }
                                 }
-                                // Reiniciar los puntos del segmento actual
                                 currentSegmentPoints = [];
                             }
                         }
 
-                        // Después de muestrear toda la línea de barrido, comprobar si queda un segmento final
                         if (currentSegmentPoints.length > 1) {
                              try {
-                                 // Guardar el último segmento si es válido
                                  generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                             } catch(e) {
                                  console.error("Error en turf.lineString al crear segmento final de pasada rotada:", e);
                             }
                         }
 
-                        // Mover al siguiente offset para la próxima pasada (basado en el ancho de trabajo)
                         rotatedCurrentOffset += workingWidth;
                     }
                 }
@@ -1589,22 +1503,17 @@
                 console.log(`Generadas ${generatedRotatedPasses.length} pasadas (segmentos de LineString) en el espacio rotado.`);
 
                 console.log(`Rotando pasadas de vuelta por ${-rotationAngle.toFixed(2)} grados.`);
-                // Rotar cada pasada generada de vuelta a la orientación original del mapa y añadirla a la capa
                 generatedRotatedPasses.forEach((rotatedPass, index) => {
                     try {
-                         // Verificar que la pasada rotada es un LineString válido
                          if (rotatedPass && rotatedPass.geometry && rotatedPass.geometry.type === 'LineString') {
-                              // Verificar que tenemos un centroide válido para la rotación
                               if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
                                   console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
-                                  return; // Saltar si el centroide no es válido
+                                  return;
                               }
-                              // Rotar la geometría de la pasada de vuelta usando el centroide original
                               const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
-                              // Añadir la pasada rotada de vuelta al mapa como una capa GeoJSON de LineString
                               L.geoJSON(originalPassGeometry, {
-                                  style: { color: '#800080', weight: 2 } // Estilo para las pasadas (morado, grosor 2)
-                              }).addTo(generatedPassesLayer); // Añadir a la capa de pasadas generadas
+                                  style: { color: '#800080', weight: 2 }
+                              }).addTo(generatedPassesLayer);
                          } else {
                               console.warn(`La pasada rotada #${index} no es un LineString válido. No se añadirá al mapa.`, rotatedPass);
                          }
@@ -1621,7 +1530,6 @@
 
             } catch (e) {
                 console.error("Error general durante la generación de pasadas:", e);
-                // Registrar el estado de las geometrías clave en caso de error general
                 console.error("Parcel Geometry (inicio):", JSON.stringify(parcelGeometry));
                 if (typeof geometryForCalculations !== 'undefined') {
                      console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
@@ -1630,9 +1538,8 @@
                      console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryToSweep));
                 }
                  if (typeof geometryForSweepAndPiP !== 'undefined') {
-                      console.error("Geometry For Sweep And PiP (polígono más grande/unión):", JSON.stringify(geometryForSweepAndPiP));
+                      console.error("Geometry For Sweep And PiP (polígono más grande):", JSON.stringify(geometryForSweepAndPiP));
                  }
-
 
                 alert("Ocurrió un error al generar las pasadas. Revisa la consola para detalles.");
                  loadingStatusDiv.textContent = 'Error al generar pasadas.';
