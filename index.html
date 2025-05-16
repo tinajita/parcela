@@ -8,7 +8,7 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist/geotiff.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
     <style>
         /* Estilos por defecto para pantallas más grandes */
         #map {
@@ -1010,7 +1010,7 @@
                                                             }
                                                        }
 
-                                                     if(consolidatedFeature && consolidatedFeature.geometry && (consolidatedFeature.geometry.type === 'Polygon' || consolidatedFeature.geometry.type === 'MultiPolygon')) {
+                                                     if(consolidatedFeature && consolidatedFeature.geometry && (consolidatedFeature.geometry.type === 'Polygon' || consolidatedConsolidatedFeature.geometry.type === 'MultiPolygon')) {
                                                           if (turf.area(consolidatedFeature) > 0) {
                                                              return consolidatedFeature;
                                                          } else {
