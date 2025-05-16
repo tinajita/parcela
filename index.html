@@ -9,6 +9,7 @@
         crossorigin="anonymous"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
     <style>
         /* Estilos por defecto para pantallas más grandes */
         #map {
@@ -163,6 +164,18 @@
 
 
     <script>
+        // Definir las proyecciones necesarias con proj4js
+        // EPSG:4326 (WGS84 Lat/Lon)
+        proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+        // EPSG:25830 (ETRS89 / UTM zone 30N) - Común en España
+        proj4.defs("EPSG:25830", "+proj=utm +zone=30 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs");
+
+        // Crear el objeto de transformación de WGS84 a ETRS89 UTM 30N
+        const wgs84ToEtrms89Utm30n = proj4("EPSG:4326", "EPSG:25830");
+        // Crear el objeto de transformación de ETRS89 UTM 30N a WGS84 (para logs si es necesario)
+        const etrms89Utm30nToWgs84 = proj4("EPSG:25830", "EPSG:4326");
+
+
         // Vista inicial en Andalucía (ajustada para Ronda)
         const map = L.map('map').setView([36.7462, -5.1612], 14); // Vista ajustada
 
@@ -296,21 +309,75 @@
             try {
                 // Obtener la imagen del GeoTIFF (asumiendo que es la primera imagen)
                 const image = await geoTiff.getImage();
-                // const geoKeys = image.getGeoKeys(); // Eliminado: parece no estar disponible en esta versión/objeto
-                const boundingBox = image.getBoundingBox(); // [west, south, east, north]
+                const mdtBoundingBox = image.getBoundingBox(); // [west, south, east, north] en ETRS89 UTM 30N
                 const width = image.getWidth();
                 const height = image.getHeight();
-                const tiepoint = image.getTiePoints()[0];
-                // CORRECCIÓN: Obtener la escala del píxel de la transformación geográfica
-                const imageMathTransform = image.getGeoTransform(); // [x_origin, x_res, x_skew, y_origin, y_skew, y_res]
-                const pixelScaleX = imageMathTransform[1]; // Resolución en X
-                const pixelScaleY = Math.abs(imageMathTransform[5]); // Resolución en Y (puede ser negativa)
 
-                // Usaremos la resolución en X para el cálculo de distancia horizontal si no hay otra información
-                const pixelResolution = pixelScaleX; // O podrías usar (pixelScaleX + pixelScaleY) / 2 si son similares
+                // Calcular la transformación de geográfico (ETRS89 UTM 30N) a píxel usando el bounding box y las dimensiones
+                const geoToPixelTransform = {
+                    xOrigin: mdtBoundingBox[0], // Longitud mínima (Oeste) en ETRS89 UTM 30N
+                    yOrigin: mdtBoundingBox[3], // Latitud máxima (Norte) en ETRS89 UTM 30N - Nota: los píxeles aumentan hacia abajo
+                    xRes: (mdtBoundingBox[2] - mdtBoundingBox[0]) / width, // Resolución en X en metros/píxel
+                    yRes: (mdtBoundingBox[1] - mdtBoundingBox[3]) / height // Resolución en Y en metros/píxel (será negativa porque la latitud disminuye hacia abajo)
+                };
+
+                console.log(`[${parcelId}] MDT Image Info: BBox ${mdtBoundingBox}, Width ${width}, Height ${height}`);
+                console.log(`[${parcelId}] Calculated GeoToPixel Transform (ETRS89 UTM 30N -> Pixel): XOrigin ${geoToPixelTransform.xOrigin}, YOrigin ${geoToPixelTransform.yOrigin}, XRes ${geoToPixelTransform.xRes}, YRes ${geoToPixelTransform.yRes}`);
 
 
-                console.log(`[${parcelId}] MDT Image Info: BBox ${boundingBox}, Width ${width}, Height ${height}, PixelScaleX ${pixelScaleX}, PixelScaleY ${pixelScaleY}`);
+                // *** VERIFICACIÓN DE COBERTURA MDT ***
+                const parcelBboxWgs84 = turf.bbox(parcelGeometry); // Bbox de la parcela en WGS84
+                // Transformar las esquinas del bbox de la parcela a ETRS89 UTM 30N
+                const parcelBboxUtm = [
+                     wgs84ToEtrms89Utm30n.forward([parcelBboxWgs84[0], parcelBboxWgs84[1]]), // [west, south] en UTM
+                     wgs84ToEtrms89Utm30n.forward([parcelBboxWgs84[2], parcelBboxWgs84[3]])  // [east, north] en UTM
+                ];
+                const parcelBboxUtmTurf = turf.bboxPolygon([parcelBboxUtm[0][0], parcelBboxUtm[0][1], parcelBboxUtm[1][0], parcelBboxUtm[1][1]]); // Crear un turf polygon del bbox en UTM
+
+                const mdtBboxUtmTurf = turf.bboxPolygon(mdtBoundingBox); // Crear un turf polygon del bbox del MDT en UTM
+
+                // Comprobar si los bounding boxes se intersectan
+                let intersectsMdt = false;
+                 try {
+                     intersectsMdt = turf.booleanIntersects(parcelBboxUtmTurf, mdtBboxUtmTurf);
+                 } catch(e) {
+                     console.error(`[${parcelId}] Error verificando intersección entre Bbox de parcela (UTM) y Bbox de MDT:`, e);
+                     // Si hay un error en la verificación, asumimos que no interseca para evitar errores posteriores
+                     intersectsMdt = false;
+                 }
+
+
+                if (!intersectsMdt) {
+                     console.warn(`[${parcelId}] El Bbox de la parcela (en UTM: ${parcelBboxUtmTurf.geometry.coordinates}) NO interseca con el Bbox del MDT (en UTM: ${mdtBoundingBox}). La parcela está fuera del área cubierta por el MDT.`);
+                     alert(`Advertencia: La parcela seleccionada está fuera del área cubierta por el archivo MDT cargado. Los cálculos de altitud y pendiente con MDT no serán posibles. Se usará el método basado en curvas de nivel (si hay suficientes).`);
+                     return { min: 'N/A', max: 'N/A', mean: 'N/A', slope: 'N/A (Fuera de cobertura MDT)' };
+                } else {
+                     console.log(`[${parcelId}] El Bbox de la parcela (en UTM) interseca con el Bbox del MDT. Procediendo con el muestreo.`);
+                }
+                // *** FIN VERIFICACIÓN DE COBERTURA MDT ***
+
+
+                // Función para convertir coordenadas geográficas (lon, lat en ETRS89 UTM 30N) a coordenadas de píxel (x, y) usando la transformación calculada
+                function etrs89Utm30nToPixel(lon, lat, transform, mdtWidth, mdtHeight) {
+                    const { xOrigin, yOrigin, xRes, yRes } = transform;
+
+                    // Coordenadas de píxel (flotantes)
+                    const pixelX = (lon - xOrigin) / xRes;
+                    const pixelY = (lat - yOrigin) / yRes; // yRes es negativa, por lo que (lat - yOrigin) será negativo y al dividir por un negativo, pixelY aumentará hacia abajo.
+
+                    // Devolver coordenadas de píxel redondeadas (para acceder a los datos)
+                    // Asegurarse de que las coordenadas estén dentro de los límites de la imagen
+                    const pixelXInt = Math.floor(pixelX);
+                    const pixelYInt = Math.floor(pixelY);
+
+                    if (pixelXInt >= 0 && pixelXInt < mdtWidth && pixelYInt >= 0 && pixelYInt < mdtHeight) {
+                         return [pixelXInt, pixelYInt];
+                    } else {
+                         // console.warn(`[${parcelId}] Punto geográfico (UTM: ${lon}, ${lat}) convertido a píxel (${pixelXInt}, ${pixelYInt}) fuera de los límites del MDT (${mdtWidth}x${mdtHeight}).`);
+                         return null; // Punto fuera de los límites del MDT
+                    }
+                }
+
 
                 // Generar puntos de muestreo dentro de la parcela
                 let pointsInParcel = [];
@@ -374,43 +441,6 @@
                 }
 
                 let altitudes = [];
-                // const imageMathTransform = image.getGeoTransform(); // [x_origin, x_res, x_skew, y_origin, y_skew, y_res]
-                // La transformación ya se obtuvo arriba para el pixel scale
-
-
-                // Función para convertir coordenadas geográficas (lon, lat) a coordenadas de píxel (x, y)
-                function geoToPixel(lon, lat, transform) {
-                    const [xOrigin, xRes, xSkew, yOrigin, ySkew, yRes] = transform;
-                    // Invertir la transformación para ir de geo a pixel
-                    // Usando la matriz inversa de la transformación afín
-                    const determinant = xRes * yRes - xSkew * ySkew;
-                    if (determinant === 0) {
-                        console.error("Determinante cero en transformación GeoTIFF. No se puede convertir geo a pixel.");
-                        return null;
-                    }
-                    const invDeterminant = 1 / determinant;
-
-                    const dx = lon - xOrigin;
-                    const dy = lat - yOrigin;
-
-                    // Coordenadas de píxel (flotantes)
-                    const pixelX = (dy * xSkew - dx * yRes) * invDeterminant;
-                    const pixelY = (dx * ySkew - dy * xRes) * invDeterminant;
-
-                    // Devolver coordenadas de píxel redondeadas (para acceder a los datos)
-                    // Es posible que necesites interpolación para mayor precisión, pero para muestreo simple, redondear es suficiente.
-                     // Asegurarse de que las coordenadas estén dentro de los límites de la imagen
-                    const pixelXInt = Math.floor(pixelX);
-                    const pixelYInt = Math.floor(pixelY);
-
-                    if (pixelXInt >= 0 && pixelXInt < width && pixelYInt >= 0 && pixelYInt < height) {
-                         return [pixelXInt, pixelYInt];
-                    } else {
-                         // console.warn(`[${parcelId}] Punto geográfico (${lon}, ${lat}) fuera de los límites del MDT.`);
-                         return null; // Punto fuera de los límites del MDT
-                    }
-                }
-
 
                 // Leer los datos de altitud de la imagen
                 // Leer la banda 0 (la primera y a menudo única banda con datos de elevación)
@@ -421,27 +451,58 @@
 
 
                 // Obtener altitud para cada punto de muestreo
-                pointsInParcel.forEach(point => {
-                    const [lon, lat] = point.geometry.coordinates;
-                    const pixelCoords = geoToPixel(lon, lat, imageMathTransform);
+                pointsInParcel.forEach((point, index) => {
+                    const [lonWgs84, latWgs84] = point.geometry.coordinates;
+                    console.log(`[${parcelId}] Punto de muestreo #${index}: Geo (WGS84) (${lonWgs84}, ${latWgs84})`); // Log punto geográfico WGS84
 
-                    if (pixelCoords) {
-                        const [pixelX, pixelY] = pixelCoords;
-                        // Calcular el índice en el array 1D
-                        const index = pixelY * width + pixelX;
-
-                        if (index >= 0 && index < elevationData.length) {
-                            const altitude = elevationData[index];
-                             // Verificar si el valor de altitud es válido (no NaN, Infinity, etc.)
-                             if (typeof altitude === 'number' && isFinite(altitude)) {
-                                 altitudes.push(altitude);
-                             } else {
-                                  console.warn(`[${parcelId}] Valor de altitud inválido en píxel (${pixelX}, ${pixelY}):`, altitude);
-                             }
-                        } else {
-                             console.warn(`[${parcelId}] Índice de píxel calculado (${index}) fuera de los límites del array de datos de elevación.`);
-                        }
+                    let transformedCoords = null;
+                    try {
+                         // *** TRANSFORMACIÓN DE COORDENADAS ***
+                         // Transforma las coordenadas de WGS84 a ETRS89 UTM 30N
+                         transformedCoords = wgs84ToEtrms89Utm30n.forward([lonWgs84, latWgs84]);
+                         console.log(`[${parcelId}] Punto de muestreo #${index}: Geo (ETRS89 UTM 30N) (${transformedCoords[0]}, ${transformedCoords[1]})`); // Log punto geográfico transformado
+                    } catch(e) {
+                         console.warn(`[${parcelId}] Error transformando coordenadas WGS84 (${lonWgs84}, ${latWgs84}) a ETRS89 UTM 30N para punto #${index}:`, e);
+                         return; // Saltar este punto si la transformación falla
                     }
+
+                    // *** VERIFICAR SI EL PUNTO TRANSFORMADO ESTÁ DENTRO DEL BBOX DEL MDT ***
+                    if (transformedCoords[0] >= mdtBoundingBox[0] && transformedCoords[0] <= mdtBoundingBox[2] &&
+                        transformedCoords[1] >= mdtBoundingBox[1] && transformedCoords[1] <= mdtBoundingBox[3]) {
+
+                        const pixelCoords = etrs89Utm30nToPixel(transformedCoords[0], transformedCoords[1], geoToPixelTransform, width, height); // Usar las coordenadas transformadas
+
+                        if (pixelCoords) {
+                            const [pixelX, pixelY] = pixelCoords;
+                            console.log(`[${parcelId}] Punto de muestreo #${index}: Pixel (${pixelX}, ${pixelY})`); // Log punto píxel
+
+                            // Calcular el índice en el array 1D
+                            const index1D = pixelY * width + pixelX;
+                            console.log(`[${parcelId}] Punto de muestreo #${index}: Índice 1D ${index1D}`); // Log índice 1D
+
+
+                            if (index1D >= 0 && index1D < elevationData.length) {
+                                const altitude = elevationData[index1D];
+                                 console.log(`[${parcelId}] Punto de muestreo #${index}: Altitud obtenida ${altitude}`); // Log altitud obtenida
+
+                                 // Verificar si el valor de altitud es válido (no NaN, Infinity, etc.)
+                                 // También podrías querer verificar un valor específico de "no data" si lo conoces
+                                 if (typeof altitude === 'number' && isFinite(altitude)) {
+                                     altitudes.push(altitude);
+                                 } else {
+                                      console.warn(`[${parcelId}] Valor de altitud inválido en píxel (${pixelX}, ${pixelY}) (Índice ${index1D}):`, altitude);
+                                 }
+                            } else {
+                                 console.warn(`[${parcelId}] Índice de píxel calculado (${index1D}) fuera de los límites del array de datos de elevación (${elevationData.length}). Píxel (${pixelX}, ${pixelY}), Dimensiones MDT (${width}x${height}).`);
+                            }
+                        } else {
+                             console.warn(`[${parcelId}] etrs89Utm30nToPixel devolvió null para punto #${index}.`); // Log si etrs89Utm30nToPixel falló
+                        }
+                    } else {
+                        console.warn(`[${parcelId}] Punto de muestreo #${index}: Geo (ETRS89 UTM 30N) (${transformedCoords[0]}, ${transformedCoords[1]}) está fuera del Bbox del MDT.`);
+                    }
+                     // *** FIN VERIFICAR SI EL PUNTO TRANSFORMADO ESTÁ DENTRO DEL BBOX DEL MDT ***
+
                 });
 
                 console.log(`[${parcelId}] Altitudes muestreadas válidas: ${altitudes.length}`);
@@ -464,14 +525,22 @@
 
                 // Usar la dimensión más larga del bounding box de la parcela como distancia horizontal
                 try {
-                     const bbox = turf.bbox(parcelGeometry); // Usamos la geometría ORIGINAL para el bbox
-                     const bboxWidth = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[1]]), {units: 'meters'});
-                     const bboxHeight = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[0], bbox[3]]), {units: units});
+                     const bbox = turf.bbox(parcelGeometry); // Usamos la geometría ORIGINAL (WGS84) para el bbox
+                     // Necesitamos transformar los puntos del bbox a ETRS89 UTM 30N para calcular la distancia en metros
+                     const bboxPointsUtm = [
+                         wgs84ToEtrms89Utm30n.forward([bbox[0], bbox[1]]), // [west, south] en UTM
+                         wgs84ToEtrms89Utm30n.forward([bbox[2], bbox[1]]), // [east, south] en UTM
+                         wgs84ToEtrms89Utm30n.forward([bbox[0], bbox[3]]), // [west, north] en UTM
+                         wgs84ToEtrms89Utm30n.forward([bbox[2], bbox[3]])  // [east, north] en UTM
+                     ];
+
+                     const bboxWidth = turf.distance(turf.point(bboxPointsUtm[0]), turf.point(bboxPointsUtm[1]), {units: 'meters'});
+                     const bboxHeight = turf.distance(turf.point(bboxPointsUtm[0]), turf.point(bboxPointsUtm[2]), {units: 'meters'}); // Usar punto inferior izquierdo y superior izquierdo
                      horizontalDistance = Math.max(bboxWidth, bboxHeight);
-                     console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox parcela original): ${horizontalDistance.toFixed(2)} m`);
+                     console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox parcela original transformada a UTM): ${horizontalDistance.toFixed(2)} m`);
 
                  } catch(e) {
-                     console.error(`[${parcelId}] Error calculando Bbox para distancia horizontal de pendiente con MDT:`, e);
+                     console.error(`[${parcelId}] Error calculando Bbox o transformando para distancia horizontal de pendiente con MDT:`, e);
                       horizontalDistance = 0; // Fallback
                  }
 
@@ -559,8 +628,8 @@
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON) - Ahora solo para visualización
-            const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF)
-             // *** FIN URLs ***
+            const mdtGeoTiffDataUrl = 'https://github.com/tinajita/parcela/raw/refs/heads/main/MDT25-ETRS89-H30-1050-4-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - ACTUALIZADA
+             // *** FIN URLs --- ACTUALIZADA ***
 
             // Cargar Parcelas (Subparcelas), Curvas de Nivel (para visualización) y MDT (para cálculo)
             Promise.all([
@@ -940,7 +1009,8 @@
              let currentSlopePercentage = null;
              if (mdtGeoTiff) {
                   loadingStatusDiv.textContent = 'Calculando pendiente con MDT para orientación de pasadas...';
-                  const altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(parcelGeometry, mdtGeoTiff);
+                  // Pasar la geometría de la parcela seleccionada directamente
+                  const altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(selectedLayer.feature.geometry, mdtGeoTiff);
                   currentSlopePercentage = parseFloat(altitudeSlopeInfo.slope);
                   console.log(`Pendiente de la parcela (MDT) para generación de pasadas: ${altitudeSlopeInfo.slope}%`);
                    // Restaurar estado del loadingStatusDiv, pero mantener el mensaje de "Generando pasadas..." después
@@ -1793,7 +1863,7 @@
                      console.error("Geometry for Calculations (después de exclusión):", JSON.stringify(geometryForCalculations));
                 }
                  if (typeof finalGeometryToSweep !== 'undefined') {
-                     console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryToSweep));
+                     console.error("Final Geometry To Sweep (después de simplificación):", JSON.stringify(finalGeometryForCalculations)); // Corregido: usar geometryForCalculations si finalGeometryToSweep es null/undefined
                 }
                  if (typeof geometryForSweepAndPiP !== 'undefined') {
                       console.error("Geometry For Sweep And PiP (polígono más grande):", JSON.stringify(geometryForSweepAndPiP));
