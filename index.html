@@ -206,7 +206,7 @@
          });
 
         // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgconline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+         const esriOverlayLabels = L.tileLayer('https://services.arcgiconline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
              attribution: 'Esri, Garmin, FAO, NOAA, USGS',
              maxZoom: 17,
              transparent: true
@@ -376,7 +376,7 @@
 
 
             // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
+            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/PARCELA.json'; // URL DE PARCELAS (seleccionable) - CORREGIDA
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
@@ -399,15 +399,15 @@
                       return response;
                  })
             ])
-            .then(([parcelasGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => {
+            .then(([parcelasGeojsonData, curvasNivelGeoJSONData, mdtTiffResponse]) => {
                 console.log("Los archivos Parcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
-                  if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
+                  if (curvasNivelGeoJSONData && curvasNivelGeoJSONData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeoJSONData.features)) {
                        // Store the GeoJSON data globally or accessible for calculation
-                       window.curvasNivelGeoJSONData = curvasNivelGeojsonData; // Make it accessible for calculation
-                       curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
+                       window.curvasNivelGeoJSONData = curvasNivelGeoJSONData; // Make it accessible for calculation
+                       curvasNivelLayer = L.geoJSON(curvasNivelGeoJSONData, {
                            style: function(feature) {
                                 return {
                                     color: '#a0522d',
@@ -420,10 +420,10 @@
                            // onEachFeature: function(feature, layer) { ... } is removed
                        }).addTo(map);
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
-                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
+                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeoJSONData.features.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeoJSONData);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
@@ -1429,7 +1429,7 @@
                   } catch(e) {
                       console.error("Error calculando distancias de la bbox rotada:", e);
                        alert("Error calculando límites de la geometría rotada para generar pasadas.");
-                       loadingStatusDiv.textContent = 'Error calculando distancias.';
+                       loadingStatusDiv.textContent = 'Error calculando límites.';
                        generarPasadasBtn.disabled = false;
                       return; // Detener si hay error
                   }
