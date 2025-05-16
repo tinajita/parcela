@@ -301,9 +301,16 @@
                 const width = image.getWidth();
                 const height = image.getHeight();
                 const tiepoint = image.getTiePoints()[0];
-                const pixelScale = image.getPixelScale()[0]; // Asumiendo que es el mismo para X e Y
+                // CORRECCIÓN: Obtener la escala del píxel de la transformación geográfica
+                const imageMathTransform = image.getGeoTransform(); // [x_origin, x_res, x_skew, y_origin, y_skew, y_res]
+                const pixelScaleX = imageMathTransform[1]; // Resolución en X
+                const pixelScaleY = Math.abs(imageMathTransform[5]); // Resolución en Y (puede ser negativa)
 
-                console.log(`[${parcelId}] MDT Image Info: BBox ${boundingBox}, Width ${width}, Height ${height}, PixelScale ${pixelScale}`);
+                // Usaremos la resolución en X para el cálculo de distancia horizontal si no hay otra información
+                const pixelResolution = pixelScaleX; // O podrías usar (pixelScaleX + pixelScaleY) / 2 si son similares
+
+
+                console.log(`[${parcelId}] MDT Image Info: BBox ${boundingBox}, Width ${width}, Height ${height}, PixelScaleX ${pixelScaleX}, PixelScaleY ${pixelScaleY}`);
 
                 // Generar puntos de muestreo dentro de la parcela
                 let pointsInParcel = [];
@@ -367,7 +374,9 @@
                 }
 
                 let altitudes = [];
-                const imageMathTransform = image.getGeoTransform(); // [x_origin, x_res, x_skew, y_origin, y_skew, y_res]
+                // const imageMathTransform = image.getGeoTransform(); // [x_origin, x_res, x_skew, y_origin, y_skew, y_res]
+                // La transformación ya se obtuvo arriba para el pixel scale
+
 
                 // Función para convertir coordenadas geográficas (lon, lat) a coordenadas de píxel (x, y)
                 function geoToPixel(lon, lat, transform) {
@@ -461,10 +470,10 @@
                      horizontalDistance = Math.max(bboxWidth, bboxHeight);
                      console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox parcela original): ${horizontalDistance.toFixed(2)} m`);
 
-                } catch(e) {
+                 } catch(e) {
                      console.error(`[${parcelId}] Error calculando Bbox para distancia horizontal de pendiente con MDT:`, e);
                       horizontalDistance = 0; // Fallback
-                }
+                 }
 
 
                 let slopePercentage = 'N/A';
