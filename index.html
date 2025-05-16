@@ -191,6 +191,10 @@
         const loadingStatusDiv = document.getElementById('loading-status'); // Referencia al indicador de carga
         const locateButton = document.getElementById('locateButton'); // Referencia al nuevo botón
 
+        // --- CONSTANTES PARA GENERACIÓN DE PASADAS ---
+        const STEEP_SLOPE_THRESHOLD = 40.0; // Porcentaje de pendiente para cambiar orientación de pasadas
+
+
         // --- Capas base ---
         // Capa Minimalista (Se mantiene)
         const minimalBaseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
@@ -917,6 +921,13 @@
 
              const units = 'meters';
 
+             // *** INCIO MODIFICACIÓN POR PENDIENTE ***
+             // Calcular pendiente de la parcela seleccionada
+             const currentSlopeInfo = calculateSlopeInfo(parcelGeometry, window.curvasNivelGeoJSONData);
+             const currentSlopePercentage = parseFloat(currentSlopeInfo.slope);
+             console.log(`Pendiente de la parcela para generación de pasadas: ${currentSlopeInfo.slope}%`);
+             // *** FIN MODIFICACIÓN POR PENDIENTE ***
+
 
              try {
                  let intersectingExclusionFeatures = [];
@@ -1374,104 +1385,114 @@
                       return;
                  }
 
+                // --- LÓGICA DE DETERMINACIÓN DE ÁNGULO DE PASADAS (MODIFICADA) ---
+                let rotationAngle = 0;
+                let sweepDirectionInRotatedSpace = 0; // 0 for N-S sweep (horizontal passes in rotated), 90 for E-W sweep (vertical passes in rotated)
+                let heuristicDirectionDescription = "";
 
-                 let rotationAngle = 0;
-                 let sweepDirectionInRotatedSpace = 0;
-                 let heuristicDirectionDescription = "";
+                let longestSegmentAngle = 0;
+                let foundLongestSegment = false;
 
-                 let longestSegmentAngle = 0;
-                 let foundLongestSegment = false;
+                if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
+                    const exteriorCoords = parcelGeometry.coordinates[0];
+                    if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
+                        let maxLength = 0;
+                        let p1Longest = null;
+                        let p2Longest = null;
 
-                  if (parcelGeometry.type === 'Polygon' && parcelGeometry.coordinates && parcelGeometry.coordinates.length > 0) {
-                     const exteriorCoords = parcelGeometry.coordinates[0];
-                     if (exteriorCoords && Array.isArray(exteriorCoords) && exteriorCoords.length > 2) {
-                          let maxLength = 0;
-                          let p1Longest = null;
-                          let p2Longest = null;
+                        for (let i = 0; i < exteriorCoords.length - 1; i++) {
+                            const p1 = turf.point(exteriorCoords[i]);
+                            const p2 = turf.point(exteriorCoords[i+1]);
+                            try {
+                                const length = turf.distance(p1, p2, {units: units});
+                                if (length > maxLength) {
+                                    maxLength = length;
+                                    p1Longest = p1;
+                                    p2Longest = p2;
+                                }
+                            } catch(e) {
+                                console.warn("Error calculando distancia para segmento en heurística:", p1, p2, e);
+                            }
+                        }
 
-                          for (let i = 0; i < exteriorCoords.length - 1; i++) {
-                              const p1 = turf.point(exteriorCoords[i]);
-                              const p2 = turf.point(exteriorCoords[i+1]);
-                              try {
-                                 const length = turf.distance(p1, p2, {units: units});
-                                 if (length > maxLength) {
-                                     maxLength = length;
-                                     p1Longest = p1;
-                                     p2Longest = p2;
-                                 }
-                              } catch(e) {
-                                 console.warn("Error calculando distancia para segmento en heurística:", p1, p2, e);
-                              }
+                        if (p1Longest && p2Longest) {
+                            try {
+                                longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
+                                foundLongestSegment = true;
+                                console.log(`Lado más largo de la parcela original encontrado. Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
+                            } catch(e) {
+                                console.warn("Error calculando bearing para lado más largo:", p1Longest, p2Longest, e);
+                                foundLongestSegment = false;
+                            }
+                        } else {
+                            console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo.");
+                        }
+                    } else {
+                        console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos.");
+                    }
+                } else {
+                    console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo.");
+                }
 
-                          }
+                const useLongestSideThreshold = 0.7;
+                let originalParcelBbox = null;
+                let originalBboxWidthMeters = 0;
+                let originalBboxHeightMeters = 0;
+                let originalParcelArea = 0;
+                let originalBboxArea = 0;
+                let originalRectangularity = 0;
 
-                          if (p1Longest && p2Longest) {
-                              try {
-                                  longestSegmentAngle = turf.bearing(p1Longest, p2Longest);
-                                  foundLongestSegment = true;
-                                  console.log(`Lado más largo de la parcela original encontrado. Longitud: ${maxLength.toFixed(2)}m, Ángulo (bearing): ${longestSegmentAngle.toFixed(2)}°`);
-                              } catch(e) {
-                                   console.warn("Error calculando bearing para lado más largo:", p1Longest, p2Longest, e);
-                                   foundLongestSegment = false;
-                              }
-                          } else {
-                               console.warn("No se encontraron suficientes puntos en el contorno exterior de la parcela original para calcular el lado más largo.");
-                          }
-                     } else {
-                         console.warn("No se pudieron obtener coordenadas exteriores de la parcela original o no hay suficientes puntos.");
-                     }
-                  } else {
-                       console.warn("La geometría original de la parcela no es un polígono simple para encontrar el lado más largo.");
-                  }
+                try {
+                    originalParcelBbox = turf.bbox(parcelGeometry);
+                    originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
+                    originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
+                    originalParcelArea = turf.area(turf.feature(parcelGeometry));
+                    originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
+                    originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
+                    console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
+                } catch(e) {
+                    console.error("Error calculando Bbox o Rectangularidad de la parcela original:", e);
+                }
 
-                 const useLongestSideThreshold = 0.7;
-                 let originalParcelBbox = null;
-                 let originalBboxWidthMeters = 0;
-                 let originalBboxHeightMeters = 0;
-                 let originalParcelArea = 0;
-                 let originalBboxArea = 0;
-                 let originalRectangularity = 0;
+                let baseRotationAngle = 0;
+                if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
+                    baseRotationAngle = -longestSegmentAngle; // Rota para alinear el lado más largo horizontalmente
+                    heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo base: ${baseRotationAngle.toFixed(2)}°)`;
+                    console.log("Heurística: Usando el lado más largo como dirección principal.");
+                } else {
+                    console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
+                    if (originalBboxWidthMeters >= originalBboxHeightMeters) {
+                        baseRotationAngle = 0; // Bbox ancha, pasadas a lo largo del ancho (E-O si no rotado)
+                        heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
+                    } else {
+                        baseRotationAngle = 90; // Bbox alta, rota 90° para que pasadas sean horizontales en espacio rotado (N-S en original)
+                        heuristicDirectionDescription = "Bounding Box original más alto que ancho (rotado 90° para pasadas horizontales en espacio rotado)";
+                    }
+                }
+                rotationAngle = baseRotationAngle; // Asignar ángulo base inicial
 
-                  try {
-                       originalParcelBbox = turf.bbox(parcelGeometry);
-                       // *** NOTA DE DEPURACIÓN: Verifica que estás usando 'originalParcelBbox' y no 'originalBbox' aquí ***
-                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
-                       originalParcelArea = turf.area(turf.feature(parcelGeometry));
-                       originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
-                       originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
+                // *** INCIO MODIFICACIÓN POR PENDIENTE (APLICACIÓN) ***
+                if (!isNaN(currentSlopePercentage) && currentSlopePercentage > STEEP_SLOPE_THRESHOLD) {
+                    console.log(`Pendiente (${currentSlopePercentage}%) > ${STEEP_SLOPE_THRESHOLD}%. Ajustando orientación de pasadas para mayor verticalidad.`);
+                    // Sumar 90 grados al ángulo base para hacer las pasadas perpendiculares a la heurística original.
+                    // Esto busca que las pasadas vayan más "arriba/abajo" en la pendiente en lugar de "a través".
+                    rotationAngle = baseRotationAngle + 90;
+                    heuristicDirectionDescription += ` [PENDIENTE > ${STEEP_SLOPE_THRESHOLD}%: +90° para aprox. verticalidad]`;
+                    console.log(`Nuevo ángulo de rotación por pendiente: ${rotationAngle.toFixed(2)}° (Base: ${baseRotationAngle.toFixed(2)}°)`);
+                }
+                // *** FIN MODIFICACIÓN POR PENDIENTE (APLICACIÓN) ***
 
-                       console.log(`Dimensiones Bbox original: Ancho ${originalBboxWidthMeters.toFixed(2)}m, Alto ${originalBboxHeightMeters.toFixed(2)}m. Rectangularidad: ${originalRectangularity.toFixed(2)}`);
+                // Normalizar el ángulo (opcional, turf.transformRotate lo maneja, pero es bueno para consistencia en logs)
+                rotationAngle = rotationAngle % 360;
+                if (rotationAngle > 180) rotationAngle -= 360;
+                if (rotationAngle < -180) rotationAngle += 360;
+                
+                sweepDirectionInRotatedSpace = 0; // Mantener barrido horizontal en el espacio rotado; la rotación en sí define la orientación final.
 
-                  } catch(e) {
-                       console.error("Error calculando Bbox o Rectangularidad de la parcela original:", e);
-                  }
+                console.log(`Dirección heurística elegida: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
+                console.log(`El barrido en el espacio rotado será ${sweepDirectionInRotatedSpace === 0 ? 'N-S (para pasadas horizontales)' : 'E-W (para pasadas verticales)'}.`);
+                 // --- FIN LÓGICA DE DETERMINACIÓN DE ÁNGULO ---
 
-
-
-                 if (foundLongestSegment && originalRectangularity > useLongestSideThreshold) {
-                     rotationAngle = -longestSegmentAngle;
-                     sweepDirectionInRotatedSpace = 0;
-                     heuristicDirectionDescription = `Lado más largo de la parcela original (ángulo original: ${longestSegmentAngle.toFixed(2)}°, rotación aplicada: ${rotationAngle.toFixed(2)}°)`;
-                      console.log("Heurística: Usando el lado más largo como dirección principal.");
-
-                 } else {
-                     console.log("Heurística: Parcela irregular o lado largo no determinante. Usando la orientación de la Bbox original.");
-                     if (originalBboxWidthMeters >= originalBboxHeightMeters) {
-                         rotationAngle = 0;
-                         sweepDirectionInRotatedSpace = 0;
-                         heuristicDirectionDescription = "Bounding Box original más ancho que alto (o igual)";
-                     } else {
-                         rotationAngle = 90;
-                         sweepDirectionInRotatedSpace = 0;
-                         heuristicDirectionDescription = "Bounding Box más alto que ancho (rotado 90° para pasadas horizontales)";
-                          console.log("Bbox más alta que ancha, rotando 90 grados para pasadas horizontales en el espacio rotado.");
-                     }
-                 }
-
-
-                 console.log(`Dirección heurística elegida: ${heuristicDirectionDescription}. Rotando el área para el barrido por ${rotationAngle.toFixed(2)} grados.`);
-                 console.log(`El barrido en el espacio rotado será ${sweepDirectionInRotatedSpace === 0 ? 'N-S (para pasadas horizontales)' : 'E-W (para pasadas verticales)'}.`);
 
                   if (!centroid || !centroid.geometry || !centroid.geometry.coordinates) {
                        console.error("Centroide no válido para la rotación. Deteniendo proceso.");
@@ -1527,7 +1548,7 @@
                      rotatedSweepLineDirection = 90;
 
                       console.log("Configurando barrido S->N en espacio rotado para generar pasadas horizontales (O->E).");
-                 } else {
+                 } else { // Esto no se usará con la lógica actual de sweepDirectionInRotatedSpace = 0
                      rotatedStartSweepCoordValue = rotatedBboxWest;
                      rotatedEndSweepCoordValue = rotatedBboxEast;
                       rotatedSweepLineStartCoord = rotatedBboxSouth;
@@ -1588,7 +1609,7 @@
                              pointOnSweepAxis = turf.destination(
                                  turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]), // Punto de origen para la distancia
                                  rotatedCurrentOffset / 1000, // Distancia en kilómetros para turf.destination
-                                 sweepDirectionInRotatedSpace, // Dirección 0 (Norte) o 90 (Este) en el espacio rotado
+                                 sweepDirectionInRotatedSpace, // Dirección 0 (Norte) o 90 (Este) en el espacio rotado - ESTO DEBERÍA SER PERPENDICULAR A LAS PASADAS
                                  {units: 'kilometers'}
                              );
                          } catch(e) {
