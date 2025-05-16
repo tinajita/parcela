@@ -441,6 +441,7 @@
                 }
 
                 let altitudes = [];
+                let pointsWithAltitudes = []; // Para almacenar puntos con altitudes válidas
 
                 // Leer los datos de altitud de la imagen
                 // Leer la banda 0 (la primera y a menudo única banda con datos de elevación)
@@ -453,14 +454,14 @@
                 // Obtener altitud para cada punto de muestreo
                 pointsInParcel.forEach((point, index) => {
                     const [lonWgs84, latWgs84] = point.geometry.coordinates;
-                    console.log(`[${parcelId}] Punto de muestreo #${index}: Geo (WGS84) (${lonWgs84}, ${latWgs84})`); // Log punto geográfico WGS84
+                    // console.log(`[${parcelId}] Punto de muestreo #${index}: Geo (WGS84) (${lonWgs84}, ${latWgs84})`); // Log punto geográfico WGS84
 
                     let transformedCoords = null;
                     try {
                          // *** TRANSFORMACIÓN DE COORDENADAS ***
                          // Transforma las coordenadas de WGS84 a ETRS89 UTM 30N
                          transformedCoords = wgs84ToEtrms89Utm30n.forward([lonWgs84, latWgs84]);
-                         console.log(`[${parcelId}] Punto de muestreo #${index}: Geo (ETRS89 UTM 30N) (${transformedCoords[0]}, ${transformedCoords[1]})`); // Log punto geográfico transformado
+                         // console.log(`[${parcelId}] Punto de muestreo #${index}: Geo (ETRS89 UTM 30N) (${transformedCoords[0]}, ${transformedCoords[1]})`); // Log punto geográfico transformado
                     } catch(e) {
                          console.warn(`[${parcelId}] Error transformando coordenadas WGS84 (${lonWgs84}, ${latWgs84}) a ETRS89 UTM 30N para punto #${index}:`, e);
                          return; // Saltar este punto si la transformación falla
@@ -474,21 +475,27 @@
 
                         if (pixelCoords) {
                             const [pixelX, pixelY] = pixelCoords;
-                            console.log(`[${parcelId}] Punto de muestreo #${index}: Pixel (${pixelX}, ${pixelY})`); // Log punto píxel
+                            // console.log(`[${parcelId}] Punto de muestreo #${index}: Pixel (${pixelX}, ${pixelY})`); // Log punto píxel
 
                             // Calcular el índice en el array 1D
                             const index1D = pixelY * width + pixelX;
-                            console.log(`[${parcelId}] Punto de muestreo #${index}: Índice 1D ${index1D}`); // Log índice 1D
+                            // console.log(`[${parcelId}] Punto de muestreo #${index}: Índice 1D ${index1D}`); // Log índice 1D
 
 
                             if (index1D >= 0 && index1D < elevationData.length) {
                                 const altitude = elevationData[index1D];
-                                 console.log(`[${parcelId}] Punto de muestreo #${index}: Altitud obtenida ${altitude}`); // Log altitud obtenida
+                                 // console.log(`[${parcelId}] Punto de muestreo #${index}: Altitud obtenida ${altitude}`); // Log altitud obtenida
 
                                  // Verificar si el valor de altitud es válido (no NaN, Infinity, etc.)
                                  // También podrías querer verificar un valor específico de "no data" si lo conoces
                                  if (typeof altitude === 'number' && isFinite(altitude)) {
                                      altitudes.push(altitude);
+                                     // Almacenar el punto original (WGS84) junto con su altitud
+                                     pointsWithAltitudes.push({
+                                          coordsWgs84: [lonWgs84, latWgs84],
+                                          coordsUtm: transformedCoords, // Guardar también las UTM
+                                          altitude: altitude
+                                     });
                                  } else {
                                       console.warn(`[${parcelId}] Valor de altitud inválido en píxel (${pixelX}, ${pixelY}) (Índice ${index1D}):`, altitude);
                                  }
@@ -506,6 +513,8 @@
                 });
 
                 console.log(`[${parcelId}] Altitudes muestreadas válidas: ${altitudes.length}`);
+                 console.log(`[${parcelId}] Puntos con altitudes válidas: ${pointsWithAltitudes.length}`);
+
 
                 if (altitudes.length === 0) {
                     console.warn(`[${parcelId}] No se obtuvieron altitudes válidas de los puntos de muestreo.`);
@@ -519,42 +528,60 @@
 
                 console.log(`[${parcelId}] Altitudes MDT: Min ${minElevation.toFixed(2)}m, Max ${maxElevation.toFixed(2)}m, Media ${meanElevation.toFixed(2)}m`);
 
-                // Calcular pendiente
-                const elevationDifference = maxElevation - minElevation;
-                let horizontalDistance = 0;
-
-                // Usar la dimensión más larga del bounding box de la parcela como distancia horizontal
-                try {
-                     const bbox = turf.bbox(parcelGeometry); // Usamos la geometría ORIGINAL (WGS84) para el bbox
-                     // Necesitamos transformar los puntos del bbox a ETRS89 UTM 30N para calcular la distancia en metros
-                     const bboxPointsUtm = [
-                         wgs84ToEtrms89Utm30n.forward([bbox[0], bbox[1]]), // [west, south] en UTM
-                         wgs84ToEtrms89Utm30n.forward([bbox[2], bbox[1]]), // [east, south] en UTM
-                         wgs84ToEtrms89Utm30n.forward([bbox[0], bbox[3]]), // [west, north] en UTM
-                         wgs84ToEtrms89Utm30n.forward([bbox[2], bbox[3]])  // [east, north] en UTM
-                     ];
-
-                     const bboxWidth = turf.distance(turf.point(bboxPointsUtm[0]), turf.point(bboxPointsUtm[1]), {units: 'meters'});
-                     const bboxHeight = turf.distance(turf.point(bboxPointsUtm[0]), turf.point(bboxPointsUtm[2]), {units: 'meters'}); // Usar punto inferior izquierdo y superior izquierdo
-                     horizontalDistance = Math.max(bboxWidth, bboxHeight);
-                     console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox parcela original transformada a UTM): ${horizontalDistance.toFixed(2)} m`);
-
-                 } catch(e) {
-                     console.error(`[${parcelId}] Error calculando Bbox o transformando para distancia horizontal de pendiente con MDT:`, e);
-                      horizontalDistance = 0; // Fallback
-                 }
-
-
+                // *** RECALCULAR PENDIENTE USANDO DISTANCIA ENTRE PUNTOS MIN/MAX ALTITUD ***
                 let slopePercentage = 'N/A';
-                // Calcula la pendiente solo si la distancia horizontal es mayor que cero
-                if (horizontalDistance > 0) {
-                    slopePercentage = (elevationDifference / horizontalDistance) * 100;
-                    console.log(`[${parcelId}] Pendiente calculada con MDT: ${slopePercentage.toFixed(2)} %`);
-                    slopePercentage = slopePercentage.toFixed(2); // Formato a 2 decimales
+                if (pointsWithAltitudes.length >= 2) {
+                    // Encontrar los puntos con altitud mínima y máxima
+                    let pointMinAlt = null;
+                    let pointMaxAlt = null;
+                    let currentMinAlt = Infinity;
+                    let currentMaxAlt = -Infinity;
+
+                    pointsWithAltitudes.forEach(point => {
+                        if (point.altitude < currentMinAlt) {
+                            currentMinAlt = point.altitude;
+                            pointMinAlt = point;
+                        }
+                        if (point.altitude > currentMaxAlt) {
+                            currentMaxAlt = point.altitude;
+                            pointMaxAlt = point;
+                        }
+                    });
+
+                    console.log(`[${parcelId}] Punto con altitud mínima (${pointMinAlt.altitude.toFixed(2)}m) en UTM: (${pointMinAlt.coordsUtm[0]}, ${pointMinAlt.coordsUtm[1]})`);
+                    console.log(`[${parcelId}] Punto con altitud máxima (${pointMaxAlt.altitude.toFixed(2)}m) en UTM: (${pointMaxAlt.coordsUtm[0]}, ${pointMaxAlt.coordsUtm[1]})`);
+
+
+                    // Calcular la distancia horizontal (en metros) entre estos dos puntos en coordenadas UTM
+                    let horizontalDistance = 0;
+                    try {
+                         // Usar turf.distance con puntos en UTM
+                         horizontalDistance = turf.distance(turf.point(pointMinAlt.coordsUtm), turf.point(pointMaxAlt.coordsUtm), {units: 'meters'});
+                         console.log(`[${parcelId}] Distancia horizontal entre puntos min/max altitud (en UTM): ${horizontalDistance.toFixed(2)} m`);
+
+                    } catch(e) {
+                         console.error(`[${parcelId}] Error calculando distancia horizontal entre puntos min/max altitud:`, e);
+                         horizontalDistance = 0;
+                    }
+
+                    const elevationDifference = maxElevation - minElevation;
+
+                    // Calcula la pendiente solo si la distancia horizontal es mayor que un umbral pequeño para evitar división por cero o por distancias insignificantes
+                     const distanceThreshold = 0.1; // 10 cm
+                    if (horizontalDistance > distanceThreshold) {
+                        slopePercentage = (elevationDifference / horizontalDistance) * 100;
+                        console.log(`[${parcelId}] Pendiente calculada con MDT (basada en puntos min/max altitud): ${slopePercentage.toFixed(2)} %`);
+                        slopePercentage = slopePercentage.toFixed(2); // Formato a 2 decimales
+                    } else {
+                        console.warn(`[${parcelId}] Distancia horizontal entre puntos min/max altitud es cero o muy pequeña (${horizontalDistance.toFixed(2)}m). No se puede calcular la pendiente con MDT.`);
+                        slopePercentage = 'N/A (Distancia muy pequeña)';
+                    }
+
                 } else {
-                    console.warn(`[${parcelId}] Distancia horizontal es cero o inválida (${horizontalDistance}). No se puede calcular la pendiente con MDT.`);
-                    slopePercentage = 'N/A (Distancia Cero)';
+                    console.warn(`[${parcelId}] Menos de 2 puntos de muestreo con altitud válida. No se puede calcular la pendiente con MDT.`);
+                    slopePercentage = 'N/A (Sin suficientes puntos)';
                 }
+                // *** FIN RECALCULAR PENDIENTE ***
 
 
                 console.log("--- Fin cálculo de altitud/pendiente con MDT ---");
@@ -628,7 +655,8 @@
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON) - Ahora solo para visualización
-            const mdtGeoTiffDataUrl = 'https://github.com/tinajita/parcela/raw/refs/heads/main/MDT25-ETRS89-H30-1050-4-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - ACTUALIZADA
+            // URL ACTUALIZADA PARA USAR LA URL DE GITHUB PAGES Y LA TESELA 1036
+            const mdtGeoTiffDataUrl = 'https://tinajita.github.io/parcela/MDT25-ETRS89-H30-1036-4-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - ACTUALIZADA A GITHUB PAGES Y TESELA 1036
              // *** FIN URLs --- ACTUALIZADA ***
 
             // Cargar Parcelas (Subparcelas), Curvas de Nivel (para visualización) y MDT (para cálculo)
@@ -762,11 +790,16 @@
                                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Subparcela seleccionada.'; // Restaurar estado
                                           }
 
-
-                                          popupContent += `Altitud Mínima (MDT): ${altitudeSlopeInfo.min} m<br>`;
-                                          popupContent += `Altitud Máxima (MDT): ${altitudeSlopeInfo.max} m<br>`;
-                                          popupContent += `Altitud Media (MDT): ${altitudeSlopeInfo.mean} m<br>`;
-                                          popupContent += `Pendiente Estimada (MDT): ${altitudeSlopeInfo.slope} %<br>`;
+                                          // Eliminar "(MDT)" de los textos del popup
+                                          popupContent += `Altitud Mínima: ${altitudeSlopeInfo.min} m<br>`;
+                                          popupContent += `Altitud Máxima: ${altitudeSlopeInfo.max} m<br>`;
+                                          popupContent += `Altitud Media: ${altitudeSlopeInfo.mean} m<br>`;
+                                          // Eliminar "(Curvas Nivel)" si está presente, solo mostrar el porcentaje
+                                          let displaySlope = altitudeSlopeInfo.slope;
+                                          if (typeof displaySlope === 'string' && displaySlope.includes('(Curvas Nivel)')) {
+                                               displaySlope = displaySlope.replace(' (Curvas Nivel)', '');
+                                          }
+                                          popupContent += `Pendiente Estimada: ${displaySlope} %<br>`;
 
 
                                           // Calcular y añadir área en hectáreas
