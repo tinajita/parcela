@@ -206,7 +206,7 @@
          });
 
         // Capa de Etiquetas Esri (Se mantiene para el híbrido)
-         const esriOverlayLabels = L.tileLayer('https://services.arcgiconline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+         const esriOverlayLabels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
              attribution: 'Esri, Garmin, FAO, NOAA, USGS',
              maxZoom: 17,
              transparent: true
@@ -376,7 +376,7 @@
 
 
             // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/PARCELA.json'; // URL DE PARCELAS (seleccionable) - CORREGIDA
+            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/JSON/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
@@ -1241,8 +1241,8 @@
 
                   try {
                        originalParcelBbox = turf.bbox(parcelGeometry);
-                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
-                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
+                       originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalBbox[1]]), turf.point([originalParcelBbox[2], originalBbox[1]]), {units: units});
+                       originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalBbox[1]]), turf.point([originalParcelBbox[0], originalBbox[3]]), {units: units});
                        originalParcelArea = turf.area(turf.feature(parcelGeometry));
                        originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
                        originalRectangularity = originalBboxArea === 0 ? 0 : originalParcelArea / originalBboxArea;
