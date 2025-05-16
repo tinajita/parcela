@@ -274,11 +274,14 @@
              layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
         }
 
-         // Función para calcular la altitud media de una parcela usando curvas de nivel (con logs de depuración)
+         // Función para calcular la altitud media de una parcela usando curvas de nivel (con logs de depuración y buffer)
         function calculateMeanAltitude(parcelGeometry, curvasNivelGeoJSON) {
             console.log("--- Iniciando cálculo de altitud media para parcela ---");
             let totalAltitude = 0;
             let intersectingContoursCount = 0;
+            const bufferDistance = 0.1; // Pequeño buffer en metros para la parcela
+            const units = 'meters';
+
             // Intenta obtener un identificador de parcela si está disponible en las propiedades
             const parcelProps = selectedLayer && selectedLayer.feature && selectedLayer.feature.properties ? selectedLayer.feature.properties : {};
             const poligono = parcelProps['MASA'] || parcelProps['poligono'] || 'N/A';
@@ -291,8 +294,24 @@
                 return null; // Datos inválidos
             }
 
-            const parcelFeature = turf.feature(parcelGeometry);
-            console.log(`[${parcelId}] ParcelFeature creada.`);
+            let parcelFeature = turf.feature(parcelGeometry);
+             let bufferedParcel = null;
+
+             try {
+                 // Añade un pequeño buffer a la parcela
+                 bufferedParcel = turf.buffer(parcelFeature, bufferDistance, {units: units});
+                  console.log(`[${parcelId}] Parcela original bufferizada por ${bufferDistance} ${units}.`);
+                 // Usa la parcela bufferizada para la detección de intersecciones
+                 parcelFeature = bufferedParcel;
+
+             } catch(e) {
+                 console.error(`[${parcelId}] Error al crear buffer para la parcela en cálculo de altitud. Usando geometría original.`, e);
+                  // Si falla el buffer, usa la geometría original de la parcela
+                  parcelFeature = turf.feature(parcelGeometry);
+             }
+
+
+            console.log(`[${parcelId}] ParcelFeature (bufferizada o original) creada para altitud.`);
             console.log(`[${parcelId}] Total de curvas de nivel en los datos: ${curvasNivelGeoJSON.features ? curvasNivelGeoJSON.features.length : 0}`);
 
 
@@ -302,7 +321,7 @@
                     // console.log(`[${parcelId}] Procesando curva de nivel #${index}.`); // Puede generar muchos logs
                     if (contourFeature.geometry && contourFeature.geometry.type === 'LineString') {
                         try {
-                             // turf.booleanIntersects es más eficiente que intersection para solo verificar cruce
+                             // Verifica intersección con la parcela (ahora bufferizada)
                             if (turf.booleanIntersects(parcelFeature, contourFeature)) {
                                  // console.log(`[${parcelId}] Intersección detectada con curva de nivel #${index}. Propiedades:`, contourFeature.properties);
 
@@ -333,13 +352,13 @@
                                     intersectingContoursCount++;
                                     // console.log(`[${parcelId}] Curva #${index} añadida al cálculo. Contador: ${intersectingContoursCount}, Total Altitud: ${totalAltitude}`);
                                 } else {
-                                    console.warn(`[${parcelId}] Curva de nivel #${index} interseca pero NO tiene propiedad de elevación numérica válida.`, contourFeature.properties);
+                                    console.warn(`[${parcelId}] Curva de nivel #${index} interseca (bufferizada) pero NO tiene propiedad de elevación numérica válida.`, contourFeature.properties);
                                 }
                             } else {
-                                 // console.log(`[${parcelId}] Curva de nivel #${index} NO interseca.`); // Puede generar muchísimos logs
+                                 // console.log(`[${parcelId}] Curva de nivel #${index} NO interseca (bufferizada).`); // Puede generar muchísimos logs
                             }
                         } catch (e) {
-                             console.error(`[${parcelId}] Error verificando intersección o procesando curva #${index}:`, e, contourFeature);
+                             console.error(`[${parcelId}] Error verificando intersección (bufferizada) o procesando curva #${index}:`, e, contourFeature);
                         }
                     } else {
                          // console.warn(`[${parcelId}] Feature #${index} en curvas de nivel no es LineString o no tiene geometría:`, contourFeature); // Puede generar muchos logs
@@ -350,25 +369,27 @@
             }
 
 
-            console.log(`[${parcelId}] Fin del bucle. Curvas que intersectan con datos válidos: ${intersectingContoursCount}`);
+            console.log(`[${parcelId}] Fin del bucle. Curvas que intersectan (bufferizada) con datos válidos: ${intersectingContoursCount}`);
 
             if (intersectingContoursCount > 0) {
                 const mean = totalAltitude / intersectingContoursCount;
-                console.log(`[${parcelId}] Altitud media calculada: ${mean.toFixed(2)} m`);
+                console.log(`[${parcelId}] Altitud media calculada: ${mean.toFixed(2)} m (usando ${intersectingContoursCount} curvas)`);
                 return mean.toFixed(2); // Retornar media con 2 decimales
             } else {
-                console.log(`[${parcelId}] No se encontraron curvas de nivel que crucen la parcela con elevación válida.`);
+                console.log(`[${parcelId}] No se encontraron curvas de nivel que crucen la parcela (bufferizada) con elevación válida.`);
                 return "N/A (Sin curvas de nivel)"; // No hay curvas de nivel que crucen la parcela
             }
              // console.log("--- Fin cálculo de altitud media para parcela ---"); // Este log nunca se alcanzará debido a los return anteriores
         }
 
-        // Función para calcular información de pendiente (min/max altitud y pendiente %)
+        // Función para calcular información de pendiente (min/max altitud y pendiente %) con buffer
         function calculateSlopeInfo(parcelGeometry, curvasNivelGeoJSON) {
             console.log("--- Iniciando cálculo de información de pendiente para parcela ---");
             let minElevation = Infinity;
             let maxElevation = -Infinity;
             let intersectingContoursCount = 0;
+            const bufferDistance = 0.1; // Pequeño buffer en metros para la parcela
+            const units = 'meters';
 
             const parcelProps = selectedLayer && selectedLayer.feature && selectedLayer.feature.properties ? selectedLayer.feature.properties : {};
             const poligono = parcelProps['MASA'] || parcelProps['poligono'] || 'N/A';
@@ -380,14 +401,31 @@
                 return { min: 'N/A', max: 'N/A', slope: 'N/A (Datos Inválidos)' };
             }
 
-            const parcelFeature = turf.feature(parcelGeometry);
-            console.log(`[${parcelId}] ParcelFeature creada para pendiente.`);
+            let parcelFeature = turf.feature(parcelGeometry);
+             let bufferedParcel = null;
+
+             try {
+                 // Añade un pequeño buffer a la parcela
+                 bufferedParcel = turf.buffer(parcelFeature, bufferDistance, {units: units});
+                 console.log(`[${parcelId}] Parcela original bufferizada por ${bufferDistance} ${units} para pendiente.`);
+                 // Usa la parcela bufferizada para la detección de intersecciones
+                 parcelFeature = bufferedParcel;
+
+             } catch(e) {
+                 console.error(`[${parcelId}] Error al crear buffer para la parcela en cálculo de pendiente. Usando geometría original.`, e);
+                 // Si falla el buffer, usa la geometría original de la parcela
+                  parcelFeature = turf.feature(parcelGeometry);
+             }
+
+
+            console.log(`[${parcelId}] ParcelFeature (bufferizada o original) creada para pendiente.`);
 
 
              if (curvasNivelGeoJSON.features && Array.isArray(curvasNivelGeoJSON.features)) {
                  curvasNivelGeoJSON.features.forEach(contourFeature => {
                      if (contourFeature.geometry && contourFeature.geometry.type === 'LineString') {
                          try {
+                              // Verifica intersección con la parcela (ahora bufferizada)
                              if (turf.booleanIntersects(parcelFeature, contourFeature)) {
                                   let elevation = null;
                                  // Check for different possible elevation properties
@@ -411,7 +449,7 @@
                                  }
                              }
                          } catch (e) {
-                              console.warn(`[${parcelId}] Error verificando intersección o procesando curva para pendiente:`, e, contourFeature);
+                              console.warn(`[${parcelId}] Error verificando intersección (bufferizada) o procesando curva para pendiente:`, e, contourFeature);
                          }
                      }
                  });
@@ -420,11 +458,11 @@
              }
 
 
-            console.log(`[${parcelId}] Fin del bucle de pendiente. Curvas que intersectan con datos válidos: ${intersectingContoursCount}`);
+            console.log(`[${parcelId}] Fin del bucle de pendiente. Curvas que intersectan (bufferizada) con datos válidos: ${intersectingContoursCount}`);
 
             // Se necesitan al menos 2 puntos de elevación para tener un rango (mínima y máxima)
             if (intersectingContoursCount < 2 || minElevation === Infinity || maxElevation === -Infinity) {
-                 console.log(`[${parcelId}] Menos de 2 curvas de nivel con datos válidos intersectan la parcela. No se puede calcular la pendiente.`);
+                 console.log(`[${parcelId}] Menos de 2 curvas de nivel con datos válidos intersectan (bufferizada) la parcela. No se puede calcular la pendiente.`);
                 return { min: 'N/A', max: 'N/A', slope: 'N/A (Sin suficientes curvas)' };
             }
 
@@ -435,11 +473,11 @@
              // Simplificación: Usar la dimensión más larga del bounding box de la parcela como distancia horizontal
              let horizontalDistance = 0;
              try {
-                  const bbox = turf.bbox(parcelGeometry);
+                  const bbox = turf.bbox(parcelGeometry); // Usamos la geometría ORIGINAL para el bbox
                   const bboxWidth = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[1]]), {units: 'meters'});
                   const bboxHeight = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[0], bbox[3]]), {units: 'meters'});
                   horizontalDistance = Math.max(bboxWidth, bboxHeight);
-                  console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox): ${horizontalDistance.toFixed(2)} m`);
+                  console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox parcela original): ${horizontalDistance.toFixed(2)} m`);
 
              } catch(e) {
                   console.error(`[${parcelId}] Error calculando Bbox para distancia horizontal de pendiente:`, e);
@@ -545,15 +583,15 @@
                       return response; // Or just return null if you don't need the response object itself
                  })
             ])
-            .then(([parcelasGeojsonData, curvasNivelGeojsonData, mdtTiffResponse]) => {
+            .then(([parcelasGeojsonData, curvasNivelGeoJSONData, mdtTiffResponse]) => {
                 console.log("Los archivos Parcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
-                  if (curvasNivelGeojsonData && curvasNivelGeojsonData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeojsonData.features)) {
+                  if (curvasNivelGeoJSONData && curvasNivelGeoJSONData.type === 'FeatureCollection' && Array.isArray(curvasNivelGeoJSONData.features)) {
                        // Store the GeoJSON data globally or accessible for calculation
-                       window.curvasNivelGeoJSONData = curvasNivelGeojsonData; // Make it accessible for calculation
-                       curvasNivelLayer = L.geoJSON(curvasNivelGeojsonData, {
+                       window.curvasNivelGeoJSONData = curvasNivelGeoJSONData; // Make it accessible for calculation
+                       curvasNivelLayer = L.geoJSON(curvasNivelGeoJSONData, {
                            style: function(feature) {
                                 return {
                                     color: '#a0522d',
@@ -566,10 +604,10 @@
                            // onEachFeature: function(feature, layer) { ... } is removed
                        }).addTo(map);
                        overlayLayers["Curvas de Nivel"] = curvasNivelLayer;
-                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeojsonData.features.length}.`);
+                       console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeoJSONData.features.length}.`);
 
                   } else {
-                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeojsonData);
+                      console.warn("Datos de Curvas de Nivel no son un FeatureCollection válido o están vacíos. No se cargarán las curvas.", curvasNivelGeoJSONData);
                        if (!loadingStatusDiv.textContent.startsWith('Error:')) {
                          loadingStatusDiv.textContent += ' Advertencia: Datos de Curvas de Nivel inválidos.';
                        }
@@ -604,7 +642,8 @@
                                      console.log("Parcela seleccionada:", feature.properties);
 
                                      // Check if zoom level is 14 or higher before showing popup
-                                     if (map.getZoom() >= 14) {
+                                     // and if parcelasLayer was successfully loaded
+                                     if (map.getZoom() >= 14 && parcelasLayer) {
                                          // Build popup content
                                          let popupContent = '<b>Parcela Seleccionada:</b><br>';
                                          let poligono = feature.properties['MASA'] || feature.properties['poligono'] || 'N/A'; // Assuming 'MASA' or 'poligono' for poligono
@@ -623,13 +662,17 @@
                                           popupContent += `Altitud Máxima (aprox): ${slopeInfo.max} m<br>`;
                                           popupContent += `Pendiente Estimada: ${slopeInfo.slope} %<br>`;
 
+
                                           // Calculate and add area in hectares
                                           const areaHa = calculateAreaInHectares(feature.geometry);
                                           popupContent += `Área: ${areaHa} Ha`;
 
                                          layer.bindPopup(popupContent).openPopup();
 
-                                     } else {
+                                     } else if (!parcelasLayer) {
+                                          console.warn("Parcelas layer not loaded. Cannot show parcel info.");
+                                     }
+                                      else {
                                           // If zoom is too low, just select the layer visually but don't show popup
                                           console.log("Zoom level too low to show parcel info popup. Zoom >= 14 required.");
                                           // Optionally, you could bind a simple popup explaining the zoom requirement,
@@ -856,7 +899,7 @@
 
         // --- Función separada para la lógica principal de generación de pasadas ---
         function generatePassesLogic() {
-             console.log("Iniciando la lógica principal de generación de pasadas.");
+             console.log("--- Inicio Lógica de Generación de Pasadas ---");
              console.log("Estado de window.exclusionFeatures al inicio de generatePassesLogic:", window.exclusionFeatures ? window.exclusionFeatures.length : 'undefined/null', window.exclusionFeatures);
 
              const selectedParcelGeoJSON = selectedLayer.toGeoJSON();
@@ -1568,10 +1611,10 @@
 
                         let fullSweepLineInRotatedSpace = null;
                          try {
-                            if (sweepDirectionInRotatedSpace === 0) { // Pasada horizontal (Oeste a Este) - CORREGIDO passCoordValue a passCenterCoord
-                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
-                            } else { // Pasada vertical (Sur a Norte) - CORREGIDO passCoordValue a passCenterCoord
-                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
+                            if (sweepDirectionInRotatedSpace === 0) { // Pasada horizontal (Oeste a Este)
+                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]); // CORREGIDO passCoordValue
+                            } else { // Pasada vertical (Sur a Norte)
+                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]); // CORREGIDO passCoordValue
                             }
                          } catch(e) {
                               console.error("Error en turf.lineString al crear línea de barrido completa:", e);
@@ -1680,7 +1723,7 @@
                 console.log("Generación de pasadas optimizadas (excluyendo zonas a evitar) finalizada.");
                  loadingStatusDiv.textContent = 'Pasadas generadas.';
                  generarPasadasBtn.disabled = false; // Re-habilitar el botón al finalizar
-                 console.log("--- Fin Generación de Pasadas ---");
+                 console.log("--- Fin Lógica de Generación de Pasadas ---");
 
             } catch (e) {
                 console.error("Error general durante la generación de pasadas:", e);
