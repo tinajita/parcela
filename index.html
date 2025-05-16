@@ -8,7 +8,7 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist/geotiff.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/geotiff.js/2.0.7/geotiff.min.js"></script>
     <style>
         /* Estilos por defecto para pantallas más grandes */
         #map {
@@ -457,7 +457,7 @@
                 try {
                      const bbox = turf.bbox(parcelGeometry); // Usamos la geometría ORIGINAL para el bbox
                      const bboxWidth = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[2], bbox[1]]), {units: 'meters'});
-                     const bboxHeight = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[0], bbox[3]]), {units: 'meters'});
+                     const bboxHeight = turf.distance(turf.point([bbox[0], bbox[1]]), turf.point([bbox[0], bbox[3]]), {units: units});
                      horizontalDistance = Math.max(bboxWidth, bboxHeight);
                      console.log(`[${parcelId}] Distancia horizontal (dimensión máx Bbox parcela original): ${horizontalDistance.toFixed(2)} m`);
 
@@ -565,7 +565,14 @@
                  }),
                  // Cargar el MDT como ArrayBuffer para geotiff.js
                  fetch(mdtGeoTiffDataUrl).then(response => {
-                      if (!response.ok) throw new Error(`Error al cargar MDT: ${response.statusText}`);
+                      if (!response.ok) {
+                          // Intenta detectar si es un error común de CORS
+                          if (response.status === 0) {
+                               throw new Error(`Error de red o CORS al cargar MDT. Asegúrate de que el servidor (${new URL(mdtGeoTiffDataUrl).origin}) permite CORS.`);
+                          } else {
+                               throw new Error(`Error HTTP ${response.status} al cargar MDT: ${response.statusText}`);
+                          }
+                      }
                       console.log("MDT (TIFF) fetch successful. Status:", response.status);
                       return response.arrayBuffer(); // Leer como ArrayBuffer
                  })
