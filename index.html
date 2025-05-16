@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Parcelas)</title>
+    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas (Subparcelas)</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -168,7 +168,7 @@
         // --- Variables ---
         let selectedLayer = null; // Variable para almacenar la capa (parcela) que está seleccionada
         let originalStyle = {}; // Variable para guardar el estilo original de cada capa de parcela
-        let parcelasLayer = null; // Capa para parcelas (seleccionable)
+        let parcelasLayer = null; // Capa para parcelas (seleccionable) - Ahora usará subparcelas
         let construccionesLayer = null; // Capa para construcciones (exclusión)
         let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
         let curvasNivelLayer = null; // Variable para la capa de curvas de nivel
@@ -284,8 +284,9 @@
 
             // Intenta obtener un identificador de parcela si está disponible en las propiedades
             const parcelProps = selectedLayer && selectedLayer.feature && selectedLayer.feature.properties ? selectedLayer.feature.properties : {};
-            const poligono = parcelProps['MASA'] || parcelProps['poligono'] || 'N/A';
-            const parcela = parcelProps['PARCELA'] || parcelProps['parcela'] || 'N/A';
+            // Ajusta las claves si el archivo de subparcelas usa nombres diferentes (ej: 'id_subpar')
+            const poligono = parcelProps['MASA'] || parcelProps['poligono'] || parcelProps['POLIGONO'] || 'N/A';
+            const parcela = parcelProps['PARCELA'] || parcelProps['parcela'] || parcelProps['ID_SUBPAR'] || 'N/A'; // Usar ID_SUBPAR u otra clave relevante
             const parcelId = `Polígono ${poligono}, Parcela ${parcela}`;
 
 
@@ -392,8 +393,9 @@
             const units = 'meters';
 
             const parcelProps = selectedLayer && selectedLayer.feature && selectedLayer.feature.properties ? selectedLayer.feature.properties : {};
-            const poligono = parcelProps['MASA'] || parcelProps['poligono'] || 'N/A';
-            const parcela = parcelProps['PARCELA'] || parcelProps['parcela'] || 'N/A';
+            // Ajusta las claves si el archivo de subparcelas usa nombres diferentes
+            const poligono = parcelProps['MASA'] || parcelProps['poligono'] || parcelProps['POLIGONO'] || 'N/A';
+            const parcela = parcelProps['PARCELA'] || parcelProps['parcela'] || parcelProps['ID_SUBPAR'] || 'N/A'; // Usar ID_SUBPAR u otra clave relevante
             const parcelId = `Polígono ${poligono}, Parcela ${parcela}`;
 
             if (!parcelGeometry || !curvasNivelGeoJSON || !curvasNivelGeoJSON.features) {
@@ -557,17 +559,18 @@
 
 
             // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
-            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/PARCELA.geojson'; // URL DE PARCELAS (seleccionable)
+            // URL ACTUALIZADA PARA USAR EL ARCHIVO DE SUBPARCELAS
+            const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/SUBPARCE.json'; // URL DE SUBPARCELAS (seleccionable)
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON)
             const mdtGeoTiffDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/MDT25-ETRS89-H30-1051-1-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - Corregida para CORS
              // *** FIN URLs ***
 
-            // Cargar solo Parcelas, Curvas de Nivel y MDT inicialmente
+            // Cargar solo Parcelas (ahora Subparcelas), Curvas de Nivel y MDT inicialmente
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
-                     if (!response.ok) throw new Error(`Error al cargar Parcelas: ${response.statusText}`);
+                     if (!response.ok) throw new Error(`Error al cargar Subparcelas: ${response.statusText}`);
                      return response.json();
                 }),
                  fetch(curvasNivelGeojsonDataUrl).then(response => {
@@ -584,7 +587,7 @@
                  })
             ])
             .then(([parcelasGeojsonData, curvasNivelGeoJSONData, mdtTiffResponse]) => {
-                console.log("Los archivos Parcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/response).");
+                console.log("Los archivos Subparcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/response).");
 
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
                  console.log("Inspeccionando y cargando capa de Curvas de Nivel...");
@@ -615,68 +618,62 @@
                 // --- Fin del código para curvas de nivel ---
 
 
-                // --- Inspeccionar y cargar capa de Parcelas (Seleccionable) ---
-                console.log("Inspeccionando y cargando capa de Parcelas...");
+                // --- Inspeccionar y cargar capa de Subparcelas (Seleccionable) ---
+                console.log("Inspeccionando y cargando capa de Subparcelas...");
                  if (parcelasGeojsonData && parcelasGeojsonData.type === 'FeatureCollection' && Array.isArray(parcelasGeojsonData.features)) {
                      parcelasLayer = L.geoJSON(parcelasGeojsonData, {
-                         style: feature => ({ color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }), // Estilo por defecto de parcela
+                         style: feature => ({ color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 }), // Estilo por defecto
                          onEachFeature: (feature, layer) => {
                              const defaultStyle = { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 };
                              originalStyle[layer._leaflet_id] = defaultStyle; // Guardar el estilo por defecto
 
                              layer.on({
                                  click: e => {
-                                     // Always deselect the previously selected layer and reset its style
+                                     // Siempre deseleccionar la capa previamente seleccionada y restablecer su estilo
                                      if (selectedLayer) {
                                          selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
-                                         // Close the popup of the previously selected layer if it's open
+                                         // Cerrar el popup de la capa previamente seleccionada si está abierto
                                          if (selectedLayer.getPopup() && selectedLayer.getPopup().isOpen()) {
                                              selectedLayer.closePopup();
                                          }
                                      }
 
-                                     // Select the new layer visually and update the selectedLayer variable
+                                     // Seleccionar la nueva capa visualmente y actualizar la variable selectedLayer
                                      layer.setStyle({ color: '#00FFFF', weight: 3, fillColor: '#00FFFF', fillOpacity: 0.3 }); // Estilo de selección
                                      selectedLayer = layer;
                                      generarPasadasBtn.disabled = false; // Habilitar botón de generar pasadas
-                                     console.log("Parcela seleccionada:", feature.properties);
+                                     console.log("Subparcela seleccionada:", feature.properties);
 
-                                     // Check if zoom level is 14 or higher before showing popup
-                                     // and if parcelasLayer was successfully loaded
-                                     if (map.getZoom() >= 14 && parcelasLayer) {
-                                         // Build popup content
-                                         let popupContent = '<b>Parcela Seleccionada:</b><br>';
-                                         let poligono = feature.properties['MASA'] || feature.properties['poligono'] || 'N/A'; // Assuming 'MASA' or 'poligono' for poligono
-                                         let parcela = feature.properties['PARCELA'] || feature.properties['parcela'] || 'N/A'; // Assuming 'PARCELA' or 'parcela' for parcela
+                                     // Verificar si el nivel de zoom es 14 o superior antes de mostrar el popup
+                                     if (map.getZoom() >= 14) {
+                                         // Construir el contenido del popup
+                                         let popupContent = '<b>Subparcela Seleccionada:</b><br>';
+                                         // Ajusta las claves según las propiedades de tu archivo SUBPARCE.json
+                                         let poligono = feature.properties['MASA'] || feature.properties['poligono'] || feature.properties['POLIGONO'] || 'N/A';
+                                         let parcela = feature.properties['PARCELA'] || feature.properties['parcela'] || feature.properties['ID_SUBPAR'] || 'N/A'; // Usar ID_SUBPAR u otra clave relevante
 
                                          popupContent += `Polígono: ${poligono}<br>`;
-                                         popupContent += `Parcela: ${parcela}<br>`;
+                                         popupContent += `Parcela/Subparcela: ${parcela}<br>`;
 
-                                          // Calculate and add mean altitude
+                                          // Calcular y añadir altitud media
                                           const meanAltitude = calculateMeanAltitude(feature.geometry, window.curvasNivelGeoJSONData);
                                           popupContent += `Altitud Media: ${meanAltitude} m<br>`;
 
-                                          // Calculate and add slope information
+                                          // Calcular y añadir información de pendiente
                                           const slopeInfo = calculateSlopeInfo(feature.geometry, window.curvasNivelGeoJSONData);
                                           popupContent += `Altitud Mínima (aprox): ${slopeInfo.min} m<br>`;
                                           popupContent += `Altitud Máxima (aprox): ${slopeInfo.max} m<br>`;
                                           popupContent += `Pendiente Estimada: ${slopeInfo.slope} %<br>`;
 
-
-                                          // Calculate and add area in hectares
+                                          // Calcular y añadir área en hectáreas
                                           const areaHa = calculateAreaInHectares(feature.geometry);
                                           popupContent += `Área: ${areaHa} Ha`;
 
                                          layer.bindPopup(popupContent).openPopup();
 
-                                     } else if (!parcelasLayer) {
-                                          console.warn("Parcelas layer not loaded. Cannot show parcel info.");
-                                     }
-                                      else {
-                                          // If zoom is too low, just select the layer visually but don't show popup
-                                          console.log("Zoom level too low to show parcel info popup. Zoom >= 14 required.");
-                                          // Optionally, you could bind a simple popup explaining the zoom requirement,
-                                          // but the user asked not to show the info globe before zoom 14.
+                                     } else {
+                                          // Si el zoom es demasiado bajo, solo seleccionar la capa visualmente sin mostrar popup
+                                          console.log("Nivel de zoom demasiado bajo para mostrar información del popup. Se requiere Zoom >= 14.");
                                      }
 
 
@@ -685,12 +682,12 @@
                              });
                          }
                      }).addTo(map);
-                     overlayLayers["Mis Parcelas"] = parcelasLayer;
-                     console.log(`Parcelas cargadas en Leaflet. Número de features en datos brutos: ${parcelasGeojsonData.features.length}`);
+                     overlayLayers["Mis Subparcelas"] = parcelasLayer; // Renombrar en el control de capas
+                     console.log(`Subparcelas cargadas en Leaflet. Número de features en datos brutos: ${parcelasGeojsonData.features.length}`);
                  } else {
-                     console.error("Datos de Parcelas no son un FeatureCollection válido o están vacíos.", parcelasGeojsonData);
-                      loadingStatusDiv.textContent = 'Error: Datos de Parcelas inválidos.'; // Sobrescribir si hay error de carga de datos
-                     alert("Error: El archivo de Parcelas no contiene un FeatureCollection válido. No se pueden cargar las parcelas.");
+                     console.error("Datos de Subparcelas no son un FeatureCollection válido o están vacíos.", parcelasGeojsonData);
+                      loadingStatusDiv.textContent = 'Error: Datos de Subparcelas inválidos.'; // Sobrescribir si hay error de carga de datos
+                     alert("Error: El archivo de Subparcelas no contiene un FeatureCollection válido. No se pueden cargar las subparcelas.");
                  }
 
 
@@ -713,12 +710,12 @@
                  // Actualizar el control de capas con las capas iniciales cargadas
                 updateLayersControl();
 
-                // Ajustar la vista del mapa a la extensión de las Parcelas si se cargaron
+                // Ajustar la vista del mapa a la extensión de las Subparcelas si se cargaron
                 if (parcelasLayer && parcelasLayer.getBounds().isValid()) {
                      map.fitBounds(parcelasLayer.getBounds());
-                     console.log("Mapa ajustado a la extensión de las parcelas.");
+                     console.log("Mapa ajustado a la extensión de las subparcelas.");
                 } else {
-                     console.warn("No se pudieron obtener bounds válidos de la capa de parcelas. Ajustando vista a Ronda...");
+                     console.warn("No se pudieron obtener bounds válidos de la capa de subparcelas. Ajustando vista a Ronda...");
                       map.setView([36.7462, -5.1612], 14); // Fallback
                 }
 
@@ -726,16 +723,16 @@
                 if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                      if (watchingLocation) {
                            if (lastKnownLocation) {
-                               loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una parcela.';
+                               loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una subparcela.';
                            } else {
                                 loadingStatusDiv.textContent = 'Datos iniciales cargados. Buscando localización...';
                            }
                      } else {
-                         loadingStatusDiv.textContent = 'Datos iniciales cargados. Geolocalización no soportada o no iniciada. Selecciona una parcela.';
+                         loadingStatusDiv.textContent = 'Datos iniciales cargados. Geolocalización no soportada o no iniciada. Selecciona una subparcela.';
                      }
                 }
 
-                console.log("Carga automática de datos iniciales finalizada. Selecciona una parcela para habilitar la generación de pasadas.");
+                console.log("Carga automática de datos iniciales finalizada. Selecciona una subparcela para habilitar la generación de pasadas.");
 
 
             })
@@ -764,12 +761,12 @@
             loadingStatusDiv.textContent = 'Generando pasadas...';
             generarPasadasBtn.disabled = true; // Deshabilitar el botón durante la generación
 
-            // Asegurarse de que haya una parcela seleccionada y sea un polígono válido
+            // Asegurarse de que haya una subparcela seleccionada y sea un polígono válido
             if (!selectedLayer || !selectedLayer.feature || !selectedLayer.feature.geometry || (selectedLayer.feature.geometry.type !== 'Polygon' && selectedLayer.feature.geometry.type !== 'MultiPolygon')) {
-                alert("Por favor, selecciona una parcela válida haciendo clic en ella primero.");
-                console.warn("selectedLayer no es una parcela válida o no tiene geometría poligonal:", selectedLayer);
-                loadingStatusDiv.textContent = 'Selecciona una parcela.';
-                generarPasadasBtn.disabled = false; // Re-habilitar si no hay parcela seleccionada
+                alert("Por favor, selecciona una subparcela válida haciendo clic en ella primero.");
+                console.warn("selectedLayer no es una subparcela válida o no tiene geometría poligonal:", selectedLayer);
+                loadingStatusDiv.textContent = 'Selecciona una subparcela.';
+                generarPasadasBtn.disabled = false; // Re-habilitar si no hay subparcela seleccionada
                 return;
             }
 
@@ -1127,7 +1124,7 @@
                           console.warn("Ocurrió un error al calcular la unión de áreas a evitar. Usando geometría original de la parcela.");
                           geometryForCalculations = parcelGeometry;
                           alert("Advertencia: Ocurrió un error al calcular la unión de áreas a evitar. Generando pasadas sobre la parcela completa. Revisa la consola.");
-                          // return; // No retornar
+                        //   return; // No retornar
                       }
                   }
 
@@ -1162,7 +1159,7 @@
                                                    } else {
                                                         try {
                                                              consolidatedCleanArea = turf.union(...validGeomsInCleanedArea);
-                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanarea.geometry.type : 'null/undefined');
+                                                            console.log("GeometryCollection de área limpia consolidado de múltiples polígonos. Resultado tipo unión:", consolidatedCleanArea ? consolidatedCleanArea.geometry.type : 'null/undefined');
                                                         } catch(e) {
                                                              console.error("Error al consolidar GeometryCollection resultante de difference:", e);
                                                               console.warn("Error procesando el área limpia compleja. Devolviendo null.");
@@ -1582,21 +1579,22 @@
                      generarPasadasBtn.disabled = false;
                     return;
                 } else {
-                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1);
+                     const sweepLimit = totalSweepExtentMeters - (workingWidth / 2) + (workingWidth * 0.1); // Añadir un pequeño margen para asegurar que se barre hasta el final
                      while (rotatedCurrentOffset <= sweepLimit ) {
 
                         let pointOnSweepAxis = null;
                          try {
+                             // Calcula un punto en el eje de barrido a la distancia 'rotatedCurrentOffset' desde el inicio del barrido
                              pointOnSweepAxis = turf.destination(
-                                 turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]),
-                                 rotatedCurrentOffset / 1000,
-                                 sweepDirectionInRotatedSpace,
+                                 turf.point(sweepDirectionInRotatedSpace === 0 ? [rotatedBboxWest, rotatedBboxSouth] : [rotatedBboxWest, rotatedBboxSouth]), // Punto de origen para la distancia
+                                 rotatedCurrentOffset / 1000, // Distancia en kilómetros para turf.destination
+                                 sweepDirectionInRotatedSpace, // Dirección 0 (Norte) o 90 (Este) en el espacio rotado
                                  {units: 'kilometers'}
                              );
                          } catch(e) {
                              console.error("Error en turf.destination al calcular punto en eje de barrido:", e);
-                             rotatedCurrentOffset += workingWidth;
-                             continue;
+                             rotatedCurrentOffset += workingWidth; // Incrementa el offset para intentar la siguiente pasada
+                             continue; // Pasa a la siguiente iteración del bucle while
                          }
 
                          if (!pointOnSweepAxis || !pointOnSweepAxis.geometry || !pointOnSweepAxis.geometry.coordinates) {
@@ -1612,9 +1610,11 @@
                         let fullSweepLineInRotatedSpace = null;
                          try {
                             if (sweepDirectionInRotatedSpace === 0) { // Pasada horizontal (Oeste a Este)
-                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]); // CORREGIDO passCoordValue
+                                 // Crea una línea horizontal a través de la bbox rotada en la coordenada 'passCenterCoord' (latitud)
+                                 fullSweepLineInRotatedSpace = turf.lineString([[rotatedBboxWest, passCenterCoord], [rotatedBboxEast, passCenterCoord]]);
                             } else { // Pasada vertical (Sur a Norte)
-                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]); // CORREGIDO passCoordValue
+                                 // Crea una línea vertical a través de la bbox rotada en la coordenada 'passCenterCoord' (longitud)
+                                 fullSweepLineInRotatedSpace = turf.lineString([[passCenterCoord, rotatedBboxSouth], [passCenterCoord, rotatedBboxNorth]]);
                             }
                          } catch(e) {
                               console.error("Error en turf.lineString al crear línea de barrido completa:", e);
@@ -1641,49 +1641,56 @@
 
                         let currentSegmentPoints = [];
 
+                         // Muestrea puntos a lo largo de la línea completa de barrido y comprueba si están dentro de la geometría limpia
                         for (let i = 0; i <= lineLength; i += samplingDistance) {
                             let point = null;
                             try {
+                                // Obtiene un punto a lo largo de la línea de barrido completa a la distancia 'i'
                                 point = turf.along(fullSweepLineInRotatedSpace, i, {units: units});
                             } catch(e) {
-                                console.warn("Error en turf.along al muestrear punto.", i, e);
-                                continue;
+                                console.warn(`Error en turf.along al muestrear punto en distancia ${i}.`, e);
+                                continue; // Salta el punto si hay error
                             }
 
                             if (!point || !point.geometry || !point.geometry.coordinates) {
                                  console.warn(`turf.along en distancia ${i} devolvió punto inválido. Saltando punto.`);
-                                 continue;
+                                 continue; // Salta el punto si es inválido
                             }
 
 
                             let isInside = false;
+                             // Verifica si el punto muestreado está dentro de la geometría del área limpia
                             if (geometryForPiPCheck && (geometryForPiPCheck.type === 'Polygon' || geometryForPiPCheck.type === 'MultiPolygon')) {
                                 try {
                                     isInside = turf.booleanPointInPolygon(point, geometryForPiPCheck);
                                 } catch(e) {
                                     console.warn("Error durante booleanPointInPolygon para punto en muestreo.", point, e);
-                                    isInside = false;
+                                    isInside = false; // Asume que no está dentro si hay error
                                 }
                             } else {
                                 console.error("La geometría para verificación PiP no es válida (esperado Polygon/MultiPolygon).", geometryForPiPCheck);
-                                isInside = false;
+                                isInside = false; // Asume que no está dentro si la geometría es inválida
                             }
 
 
                             if (isInside && point && point.geometry && point.geometry.coordinates) {
+                                // Si el punto está dentro, añádelo al segmento actual
                                 currentSegmentPoints.push(point.geometry.coordinates);
                             } else {
-                                if (currentSegmentPoints.length > 1) {
+                                // Si el punto no está dentro O hubo un error, termina el segmento actual si hay puntos suficientes
+                                if (currentSegmentPoints.length > 1) { // Un segmento válido requiere al menos 2 puntos
                                      try {
+                                         // Añade el segmento (LineString) al array de pasadas generadas
                                          generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
                                      } catch(e) {
                                          console.error("Error en turf.lineString al crear segmento de pasada rotada:", e);
                                      }
                                 }
-                                currentSegmentPoints = [];
+                                currentSegmentPoints = []; // Reinicia los puntos para el próximo segmento
                             }
                         }
 
+                        // Después de muestrear toda la línea de barrido, añade el último segmento si existe
                         if (currentSegmentPoints.length > 1) {
                              try {
                                  generatedRotatedPasses.push(turf.lineString(currentSegmentPoints));
@@ -1692,6 +1699,7 @@
                             }
                         }
 
+                        // Incrementa el offset para la siguiente pasada
                         rotatedCurrentOffset += workingWidth;
                     }
                 }
@@ -1707,9 +1715,11 @@
                                   console.warn(`Centroide no válido al rotar pasada #${index}. Saltando rotación para esta pasada.`);
                                   return;
                               }
+                              // Rota la geometría de la pasada de vuelta al espacio original usando el centroide original
                               const originalPassGeometry = turf.transformRotate(rotatedPass.geometry, -rotationAngle, {pivot: centroid});
+                              // Añade la pasada rotada al mapa
                               L.geoJSON(originalPassGeometry, {
-                                  style: { color: '#800080', weight: 2 }
+                                  style: { color: '#800080', weight: 2 } // Estilo para las pasadas generadas (morado)
                               }).addTo(generatedPassesLayer);
                          } else {
                               console.warn(`La pasada rotada #${index} no es un LineString válido. No se añadirá al mapa.`, rotatedPass);
@@ -1826,9 +1836,9 @@
 
              if (!loadingStatusDiv.textContent.startsWith('Error:') && !loadingStatusDiv.textContent.includes('Advertencia:')) {
                  if (selectedLayer) {
-                     loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Parcela seleccionada.';
+                     loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Subparcela seleccionada.';
                  } else {
-                      loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una parcela.';
+                      loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Selecciona una subparcela.';
                  }
 
              }
@@ -1898,7 +1908,7 @@
 
         // --- LOGS INICIALES ---
         console.log("Mapa Leaflet con capas base, Catastro (WMS) inicializados.");
-        console.log("La carga automática de datos geoespaciales iniciales (Parcelas, Curvas Nivel, MDT) comenzará al terminar de cargar el DOM.");
+        console.log("La carga automática de datos geoespaciales iniciales (Subparcelas, Curvas Nivel, MDT) comenzará al terminar de cargar el DOM.");
         console.log("La búsqueda de localización GPS se iniciará al cargar el DOM si el navegador lo soporta.");
 
     </script>
