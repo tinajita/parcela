@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con Leaflet, Catastro, GeoJSONs, MDT y Generación de Pasadas</title>
+    <title>Mapa con Leaflet, Catastro, GeoJSONs, Multiples MDT y Generación de Pasadas</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -186,7 +186,7 @@
         let construccionesLayer = null; // Capa para construcciones (exclusión)
         let elementosInternosLayer = null; // Capa para viales/arroyos/elementos internos (exclusión)
         let curvasNivelLayer = null; // Variable para la capa de curvas de nivel (ahora solo para visualización)
-        let mdtGeoTiff = null; // Variable para almacenar el objeto GeoTIFF del MDT
+        let mdtGeoTiffs = []; // Array para almacenar los objetos GeoTIFF de los MDT cargados
         window.exclusionFeatures = []; // Declarada explícitamente en window
         let generatedPassesLayer = L.featureGroup().addTo(map); // Capa para las pasadas generadas
         let exclusionLayersLoaded = false; // Flag para saber si los datos de exclusión ya se cargaron
@@ -293,6 +293,53 @@
              layersControl = L.control.layers(baseLayers, overlayLayers).addTo(map);
         }
 
+        // Función para verificar si una geometría está cubierta por un MDT
+        function isGeometryCoveredByMDT(geometry, mdtGeoTiff) {
+             if (!geometry || !mdtGeoTiff) return false;
+
+             try {
+                  const image = mdtGeoTiff.getImage();
+                  const mdtBoundingBox = image.getBoundingBox(); // [west, south, east, north] en ETRS89 UTM 30N
+
+                  const parcelBboxWgs84 = turf.bbox(geometry); // Bbox de la parcela en WGS84
+
+                  // Transformar las esquinas del bbox de la parcela a ETRS89 UTM 30N
+                  const parcelBboxUtm = [
+                       wgs84ToEtrms89Utm30n.forward([parcelBboxWgs84[0], parcelBboxWgs84[1]]), // [west, south] en UTM
+                       wgs84ToEtrms89Utm30n.forward([parcelBboxWgs84[2], parcelBboxWgs84[3]])  // [east, north] en UTM
+                  ];
+                  const parcelBboxUtmTurf = turf.bboxPolygon([parcelBboxUtm[0][0], parcelBboxUtm[0][1], parcelBboxUtm[1][0], parcelBboxUtm[1][1]]); // Crear un turf polygon del bbox en UTM
+
+                  const mdtBboxUtmTurf = turf.bboxPolygon(mdtBoundingBox); // Crear un turf polygon del bbox del MDT en UTM
+
+                  // Comprobar si los bounding boxes se intersectan
+                  return turf.booleanIntersects(parcelBboxUtmTurf, mdtBboxUtmTurf);
+
+             } catch (e) {
+                  console.error("Error verificando cobertura de geometría con MDT:", e);
+                  return false; // Asumir que no cubre si hay un error
+             }
+        }
+
+        // Función para encontrar el primer MDT cargado que cubre la geometría de la parcela
+        function findCoveringMDT(parcelGeometry, mdtGeoTiffsArray) {
+             if (!parcelGeometry || !mdtGeoTiffsArray || mdtGeoTiffsArray.length === 0) {
+                  console.warn("No hay MDTs cargados o geometría de parcela inválida para encontrar MDT de cobertura.");
+                  return null;
+             }
+
+             for (const mdt of mdtGeoTiffsArray) {
+                  if (mdt && isGeometryCoveredByMDT(parcelGeometry, mdt)) {
+                       console.log("Encontrado MDT de cobertura para la parcela.");
+                       return mdt; // Retorna el primer MDT que cubre la parcela
+                  }
+             }
+
+             console.warn("Ninguno de los MDTs cargados cubre la parcela seleccionada.");
+             return null; // Ningún MDT cubre la parcela
+        }
+
+
         // Función para calcular altitud min/max/media y pendiente usando el MDT
         async function calculateMdtAltitudeAndSlope(parcelGeometry, geoTiff) {
             console.log("--- Iniciando cálculo de altitud/pendiente con MDT para parcela ---");
@@ -323,38 +370,6 @@
 
                 console.log(`[${parcelId}] MDT Image Info: BBox ${mdtBoundingBox}, Width ${width}, Height ${height}`);
                 console.log(`[${parcelId}] Calculated GeoToPixel Transform (ETRS89 UTM 30N -> Pixel): XOrigin ${geoToPixelTransform.xOrigin}, YOrigin ${geoToPixelTransform.yOrigin}, XRes ${geoToPixelTransform.xRes}, YRes ${geoToPixelTransform.yRes}`);
-
-
-                // *** VERIFICACIÓN DE COBERTURA MDT ***
-                const parcelBboxWgs84 = turf.bbox(parcelGeometry); // Bbox de la parcela en WGS84
-                // Transformar las esquinas del bbox de la parcela a ETRS89 UTM 30N
-                const parcelBboxUtm = [
-                     wgs84ToEtrms89Utm30n.forward([parcelBboxWgs84[0], parcelBboxWgs84[1]]), // [west, south] en UTM
-                     wgs84ToEtrms89Utm30n.forward([parcelBboxWgs84[2], parcelBboxWgs84[3]])  // [east, north] en UTM
-                ];
-                const parcelBboxUtmTurf = turf.bboxPolygon([parcelBboxUtm[0][0], parcelBboxUtm[0][1], parcelBboxUtm[1][0], parcelBboxUtm[1][1]]); // Crear un turf polygon del bbox en UTM
-
-                const mdtBboxUtmTurf = turf.bboxPolygon(mdtBoundingBox); // Crear un turf polygon del bbox del MDT en UTM
-
-                // Comprobar si los bounding boxes se intersectan
-                let intersectsMdt = false;
-                 try {
-                     intersectsMdt = turf.booleanIntersects(parcelBboxUtmTurf, mdtBboxUtmTurf);
-                 } catch(e) {
-                     console.error(`[${parcelId}] Error verificando intersección entre Bbox de parcela (UTM) y Bbox de MDT:`, e);
-                     // Si hay un error en la verificación, asumimos que no interseca para evitar errores posteriores
-                     intersectsMdt = false;
-                 }
-
-
-                if (!intersectsMdt) {
-                     console.warn(`[${parcelId}] El Bbox de la parcela (en UTM: ${parcelBboxUtmTurf.geometry.coordinates}) NO interseca con el Bbox del MDT (en UTM: ${mdtBoundingBox}). La parcela está fuera del área cubierta por el MDT.`);
-                     alert(`Advertencia: La parcela seleccionada está fuera del área cubierta por el archivo MDT cargado. Los cálculos de altitud y pendiente con MDT no serán posibles. Se usará el método basado en curvas de nivel (si hay suficientes).`);
-                     return { min: 'N/A', max: 'N/A', mean: 'N/A', slope: 'N/A (Fuera de cobertura MDT)' };
-                } else {
-                     console.log(`[${parcelId}] El Bbox de la parcela (en UTM) interseca con el Bbox del MDT. Procediendo con el muestreo.`);
-                }
-                // *** FIN VERIFICACIÓN DE COBERTURA MDT ***
 
 
                 // Función para convertir coordenadas geográficas (lon, lat en ETRS89 UTM 30N) a coordenadas de píxel (x, y) usando la transformación calculada
@@ -650,16 +665,48 @@
 
 
             // *** LAS URLs DE TUS ARCHIVOS GEOESPACIALES ***
-            // URL ACTUALIZADA PARA USAR EL ARCHIVO DE SUBPARCELAS
             const parcelasGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/SUBPARCE.json'; // URL DE SUBPARCELAS (seleccionable)
             const construccionesGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/CONSTRU.json'; // URL DE CONSTRUCCIONES (exclusión)
             const elementosInternosGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/ELEMLIN.json'; // URL DE ELEMENTOS INTERNOS (exclusión - puede necesitar buffer)
             const curvasNivelGeojsonDataUrl = 'https://raw.githubusercontent.com/tinajita/parcela/refs/heads/main/BTN0201L_CUR_NIV.json'; // URL CORRECTA DE CURVAS DE NIVEL (GeoJSON) - Ahora solo para visualización
-            // URL ACTUALIZADA PARA USAR LA URL DE GITHUB PAGES Y LA TESELA 1036
-            const mdtGeoTiffDataUrl = 'https://tinajita.github.io/parcela/MDT25-ETRS89-H30-1036-4-COB2.tif'; // URL CORRECTA DEL MDT (TIFF) - ACTUALIZADA A GITHUB PAGES Y TESELA 1036
+
+            // ARRAY DE URLs DE ARCHIVOS MDT (TIFF) - ACTUALIZADAS A GITHUB PAGES
+            const mdtGeoTiffDataUrls = [
+                 'https://tinajita.github.io/parcela/MDT25-ETRS89-H30-1036-4-COB2.tif',
+                 'https://tinajita.github.io/parcela/MDT25-ETRS89-H30-1035-2-COB2.tif',
+                 'https://tinajita.github.io/parcela/MDT25-ETRS89-H30-1036-3-COB2.tif',
+                 'https://tinajita.github.io/parcela/MDT25-ETRS89-H30-1036-4-COB2%20(1).tif' // URL con (1)
+            ];
              // *** FIN URLs --- ACTUALIZADA ***
 
-            // Cargar Parcelas (Subparcelas), Curvas de Nivel (para visualización) y MDT (para cálculo)
+            // Preparar las promesas para cargar todos los archivos MDT
+            const mdtPromises = mdtGeoTiffDataUrls.map(url =>
+                 fetch(url)
+                     .then(response => {
+                          if (!response.ok) {
+                               if (response.status === 0) {
+                                    throw new Error(`Error de red o CORS al cargar MDT desde ${url}. Asegúrate de que el servidor (${new URL(url).origin}) permite CORS.`);
+                               } else {
+                                    throw new Error(`Error HTTP ${response.status} al cargar MDT desde ${url}: ${response.statusText}`);
+                               }
+                          }
+                          console.log(`MDT (TIFF) fetch successful desde ${url}. Status:`, response.status);
+                          return response.arrayBuffer(); // Leer como ArrayBuffer
+                     })
+                     .then(arrayBuffer => {
+                          console.log(`Abriendo MDT (TIFF) desde ${url} con geotiff.js...`);
+                          return GeoTIFF.fromArrayBuffer(arrayBuffer); // Abrir con geotiff.js
+                     })
+                     .catch(error => {
+                          console.error(`Error procesando MDT desde ${url}:`, error);
+                          // No lanzamos el error aquí para que Promise.all no falle si un solo archivo falla
+                          // Retornamos null o undefined para indicar que este archivo falló
+                          return null;
+                     })
+            );
+
+
+            // Cargar Parcelas (Subparcelas), Curvas de Nivel (para visualización) y TODOS los MDT (para cálculo)
             Promise.all([
                 fetch(parcelasGeojsonDataUrl).then(response => {
                      if (!response.ok) throw new Error(`Error al cargar Subparcelas: ${response.statusText}`);
@@ -669,39 +716,22 @@
                       if (!response.ok) throw new Error(`Error al cargar Curvas de Nivel: ${response.statusText}`);
                       return response.json();
                  }),
-                 // Cargar el MDT como ArrayBuffer para geotiff.js
-                 fetch(mdtGeoTiffDataUrl).then(response => {
-                      if (!response.ok) {
-                          // Intenta detectar si es un error común de CORS
-                          if (response.status === 0) {
-                               throw new Error(`Error de red o CORS al cargar MDT. Asegúrate de que el servidor (${new URL(mdtGeoTiffDataUrl).origin}) permite CORS.`);
-                          } else {
-                               throw new Error(`Error HTTP ${response.status} al cargar MDT: ${response.statusText}`);
-                          }
-                      }
-                      console.log("MDT (TIFF) fetch successful. Status:", response.status);
-                      return response.arrayBuffer(); // Leer como ArrayBuffer
-                 })
+                 Promise.all(mdtPromises) // Esperar a que todas las promesas de MDT se resuelvan (o fallen individualmente)
             ])
-            .then(async ([parcelasGeojsonData, curvasNivelGeoJSONData, mdtArrayBuffer]) => { // Usar async aquí
-                console.log("Los archivos Subparcelas, Curvas de Nivel y MDT se cargaron con éxito (primer paso de fetch/json/arrayBuffer).");
+            .then(([parcelasGeojsonData, curvasNivelGeoJSONData, loadedMdtGeoTiffs]) => {
+                console.log("Los archivos GeoJSON iniciales y los intentos de carga de MDT han finalizado.");
 
-                // --- Cargar el MDT (TIFF) con geotiff.js ---
-                 console.log("Abriendo MDT (TIFF) con geotiff.js...");
-                 try {
-                     mdtGeoTiff = await GeoTIFF.fromArrayBuffer(mdtArrayBuffer);
-                     console.log("MDT (TIFF) abierto con éxito por geotiff.js.");
-                     // No añadimos el MDT como capa visual por defecto, pero está disponible para cálculos.
-                     // Si quisieras visualizarlo, necesitarías lógica adicional (ej. usando leaflet-geotiff)
-                 } catch(e) {
-                     console.error("Error abriendo MDT (TIFF) con geotiff.js:", e);
-                      if (!loadingStatusDiv.textContent.startsWith('Error:')) {
-                         loadingStatusDiv.textContent += ' Advertencia: Fallo al abrir MDT TIFF.';
+                // Filtrar los MDTs que se cargaron correctamente
+                mdtGeoTiffs = loadedMdtGeoTiffs.filter(mdt => mdt !== null);
+                console.log(`MDTs (TIFF) cargados y procesados con éxito: ${mdtGeoTiffs.length} de ${mdtGeoTiffDataUrls.length} intentados.`);
+
+                if (mdtGeoTiffs.length === 0) {
+                    console.warn("Ningún archivo MDT se cargó correctamente. Los cálculos de altitud/pendiente usarán solo curvas de nivel.");
+                     if (!loadingStatusDiv.textContent.startsWith('Error:')) {
+                         loadingStatusDiv.textContent += ' Advertencia: Fallo al cargar archivos MDT.';
                        }
-                      alert("Advertencia: Fallo al procesar el archivo MDT. Los cálculos de altitud y pendiente usarán el método basado en curvas de nivel (si hay suficientes).");
-                      mdtGeoTiff = null; // Asegurar que sea null si falla la carga/apertura
-                 }
-                // --- Fin carga MDT ---
+                     alert("Advertencia: Fallo al cargar los archivos MDT. Los cálculos de altitud y pendiente usarán el método basado en curvas de nivel (si hay suficientes). Revisa la consola para detalles de los errores de carga de MDT.");
+                }
 
 
                 // --- Código para cargar la capa de curvas de nivel (GeoJSON) ---
@@ -717,9 +747,6 @@
                                     opacity: 0.3
                                 };
                            }
-                           // Popups for individual contour lines are removed as requested,
-                           // info will be aggregated for the parcel popup.
-                           // onEachFeature: function(feature, layer) { ... } is removed
                        }).addTo(map);
                        overlayLayers["Curvas de Nivel (Visual)"] = curvasNivelLayer; // Renombrar
                        console.log(`Curvas de Nivel cargadas en Leaflet. Número de features: ${curvasNivelGeoJSONData.features.length}.`);
@@ -743,7 +770,7 @@
                              originalStyle[layer._leaflet_id] = defaultStyle; // Guardar el estilo por defecto
 
                              layer.on({
-                                 click: async e => { // Usar async aquí para await calculateMdtAltitudeAndSlope
+                                 click: async e => { // Usar async aquí
                                      // Siempre deseleccionar la capa previamente seleccionada y restablecer su estilo
                                      if (selectedLayer) {
                                          selectedLayer.setStyle(originalStyle[selectedLayer._leaflet_id] || { color: '#000000', weight: 1, fillColor: '#ffffff', fillOpacity: 0.0 });
@@ -770,36 +797,39 @@
                                          popupContent += `Polígono: ${poligono}<br>`;
                                          popupContent += `Parcela/Subparcela: ${parcela}<br>`;
 
-                                          // Calcular y añadir información de altitud y pendiente (PRIORIZANDO MDT)
+                                          // --- Calcular y añadir información de altitud y pendiente ---
                                           let altitudeSlopeInfo = { min: 'N/A', max: 'N/A', mean: 'N/A', slope: 'N/A (Error)' };
-                                          if (mdtGeoTiff) {
+                                          let usedMethod = "Curvas Nivel"; // Método por defecto
+
+                                          // Intentar encontrar un MDT que cubra la parcela
+                                          const coveringMdt = findCoveringMDT(feature.geometry, mdtGeoTiffs);
+
+                                          if (coveringMdt) {
                                                loadingStatusDiv.textContent = 'Calculando altitud/pendiente con MDT...';
-                                               altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(feature.geometry, mdtGeoTiff);
+                                               altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(feature.geometry, coveringMdt);
+                                               usedMethod = "MDT";
                                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Subparcela seleccionada.'; // Restaurar estado
                                           } else {
                                                loadingStatusDiv.textContent = 'Calculando altitud/pendiente con Curvas de Nivel...';
-                                                // Fallback a curvas de nivel si el MDT no está disponible o falló
+                                                // Fallback a curvas de nivel si ningún MDT cubre la parcela
                                                const slopeInfoContour = calculateSlopeInfo(feature.geometry, window.curvasNivelGeoJSONData);
                                                const meanAltitudeContour = calculateMeanAltitude(feature.geometry, window.curvasNivelGeoJSONData);
                                                altitudeSlopeInfo = {
                                                     min: slopeInfoContour.min,
                                                     max: slopeInfoContour.max,
                                                     mean: meanAltitudeContour,
-                                                    slope: slopeInfoContour.slope + ' (Curvas Nivel)' // Indicar que es por curvas
+                                                    slope: slopeInfoContour.slope // Ya no añadimos "(Curvas Nivel)" aquí
                                                };
+                                               usedMethod = "Curvas Nivel";
                                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Subparcela seleccionada.'; // Restaurar estado
                                           }
 
-                                          // Eliminar "(MDT)" de los textos del popup
+
                                           popupContent += `Altitud Mínima: ${altitudeSlopeInfo.min} m<br>`;
                                           popupContent += `Altitud Máxima: ${altitudeSlopeInfo.max} m<br>`;
                                           popupContent += `Altitud Media: ${altitudeSlopeInfo.mean} m<br>`;
-                                          // Eliminar "(Curvas Nivel)" si está presente, solo mostrar el porcentaje
-                                          let displaySlope = altitudeSlopeInfo.slope;
-                                          if (typeof displaySlope === 'string' && displaySlope.includes('(Curvas Nivel)')) {
-                                               displaySlope = displaySlope.replace(' (Curvas Nivel)', '');
-                                          }
-                                          popupContent += `Pendiente Estimada: ${displaySlope} %<br>`;
+                                          popupContent += `Pendiente Estimada: ${altitudeSlopeInfo.slope} %<br>`;
+                                          popupContent += `(Fuente: ${usedMethod})<br>`; // Indicar la fuente del cálculo
 
 
                                           // Calcular y añadir área en hectáreas
@@ -1038,28 +1068,31 @@
 
              const units = 'meters';
 
-             // *** INCIO MODIFICACIÓN POR PENDIENTE (USANDO MDT) ***
+             // --- INCIO MODIFICACIÓN POR PENDIENTE ---
              let currentSlopePercentage = null;
-             if (mdtGeoTiff) {
+             let usedSlopeSource = "Curvas Nivel"; // Por defecto
+
+             // Intentar encontrar un MDT que cubra la parcela para el cálculo de pendiente
+             const coveringMdtForSlope = findCoveringMDT(selectedLayer.feature.geometry, mdtGeoTiffs);
+
+             if (coveringMdtForSlope) {
                   loadingStatusDiv.textContent = 'Calculando pendiente con MDT para orientación de pasadas...';
-                  // Pasar la geometría de la parcela seleccionada directamente
-                  const altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(selectedLayer.feature.geometry, mdtGeoTiff);
+                  const altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(selectedLayer.feature.geometry, coveringMdtForSlope);
                   currentSlopePercentage = parseFloat(altitudeSlopeInfo.slope);
-                  console.log(`Pendiente de la parcela (MDT) para generación de pasadas: ${altitudeSlopeInfo.slope}%`);
-                   // Restaurar estado del loadingStatusDiv, pero mantener el mensaje de "Generando pasadas..." después
-                  loadingStatusDiv.textContent = 'Generando pasadas...';
+                  usedSlopeSource = "MDT";
+                  console.log(`Pendiente de la parcela (${usedSlopeSource}) para generación de pasadas: ${altitudeSlopeInfo.slope}%`);
+                  loadingStatusDiv.textContent = 'Generando pasadas...'; // Restaurar estado
 
              } else {
-                  // Fallback a curvas de nivel si MDT no está disponible
+                  // Fallback a curvas de nivel si ningún MDT cubre la parcela para el cálculo de pendiente
                   loadingStatusDiv.textContent = 'Calculando pendiente con Curvas de Nivel para orientación de pasadas...';
                   const slopeInfoContour = calculateSlopeInfo(parcelGeometry, window.curvasNivelGeoJSONData);
                   currentSlopePercentage = parseFloat(slopeInfoContour.slope);
-                  console.log(`Pendiente de la parcela (Curvas Nivel) para generación de pasadas: ${slopeInfoContour.slope}%`);
-                   // Restaurar estado del loadingStatusDiv, pero mantener el mensaje de "Generando pasadas..." después
-                   loadingStatusDiv.textContent = 'Generando pasadas...';
+                  usedSlopeSource = "Curvas Nivel";
+                  console.log(`Pendiente de la parcela (${usedSlopeSource}) para generación de pasadas: ${slopeInfoContour.slope}%`);
+                  loadingStatusDiv.textContent = 'Generando pasadas...'; // Restaurar estado
              }
-
-             // *** FIN MODIFICACIÓN POR PENDIENTE (USANDO MDT) ***
+             // --- FIN MODIFICACIÓN POR PENDIENTE ---
 
 
              try {
