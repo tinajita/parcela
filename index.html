@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mapa con Leaflet, Catastro, GeoJSONs, Multiples MDT y Generación de Pasadas</title>
+    <title>Mapa con Leaflet, Catastro, GeoJSONs y Generación de Pasadas</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin="anonymous"/>
@@ -563,16 +563,19 @@
                         }
                     });
 
-                    console.log(`[${parcelId}] Punto con altitud mínima (${pointMinAlt.altitude.toFixed(2)}m) en UTM: (${pointMinAlt.coordsUtm[0]}, ${pointMinAlt.coordsUtm[1]})`);
-                    console.log(`[${parcelId}] Punto con altitud máxima (${pointMaxAlt.altitude.toFixed(2)}m) en UTM: (${pointMaxAlt.coordsUtm[0]}, ${pointMaxAlt.coordsUtm[1]})`);
+                    console.log(`[${parcelId}] DEBUG - Punto Min Altitud (objeto):`, pointMinAlt);
+                    console.log(`[${parcelId}] DEBUG - Punto Max Altitud (objeto):`, pointMaxAlt);
 
 
                     // Calcular la distancia horizontal (en metros) entre estos dos puntos en coordenadas UTM
                     let horizontalDistance = 0;
                     try {
-                         // Usar turf.distance con puntos en UTM
-                         horizontalDistance = turf.distance(turf.point(pointMinAlt.coordsUtm), turf.point(pointMaxAlt.coordsUtm), {units: 'meters'});
-                         console.log(`[${parcelId}] Distancia horizontal entre puntos min/max altitud (en UTM): ${horizontalDistance.toFixed(2)} m`);
+                         // CORRECCIÓN: Calcular la distancia euclidiana directamente usando las coordenadas UTM
+                         const dx = pointMaxAlt.coordsUtm[0] - pointMinAlt.coordsUtm[0];
+                         const dy = pointMaxAlt.coordsUtm[1] - pointMinAlt.coordsUtm[1];
+                         horizontalDistance = Math.sqrt(dx * dx + dy * dy);
+
+                         console.log(`[${parcelId}] Distancia horizontal entre puntos min/max altitud (en UTM, calculada directamente): ${horizontalDistance.toFixed(2)} m`);
 
                     } catch(e) {
                          console.error(`[${parcelId}] Error calculando distancia horizontal entre puntos min/max altitud:`, e);
@@ -799,7 +802,7 @@
 
                                           // --- Calcular y añadir información de altitud y pendiente ---
                                           let altitudeSlopeInfo = { min: 'N/A', max: 'N/A', mean: 'N/A', slope: 'N/A (Error)' };
-                                          let usedMethod = "Curvas Nivel"; // Método por defecto
+                                          let usedMethod = ""; // Vacío para no mostrar la fuente
 
                                           // Intentar encontrar un MDT que cubra la parcela
                                           const coveringMdt = await findCoveringMDT(feature.geometry, mdtGeoTiffs); // Added await
@@ -818,7 +821,7 @@
                                                     min: slopeInfoContour.min,
                                                     max: slopeInfoContour.max,
                                                     mean: meanAltitudeContour,
-                                                    slope: slopeInfoContour.slope // Ya no añadimos "(Curvas Nivel)" aquí
+                                                    slope: slopeInfoContour.slope
                                                };
                                                usedMethod = "Curvas Nivel";
                                                loadingStatusDiv.textContent = 'Datos iniciales cargados. Localización encontrada. Subparcela seleccionada.'; // Restaurar estado
@@ -829,7 +832,7 @@
                                           popupContent += `Altitud Máxima: ${altitudeSlopeInfo.max} m<br>`;
                                           popupContent += `Altitud Media: ${altitudeSlopeInfo.mean} m<br>`;
                                           popupContent += `Pendiente Estimada: ${altitudeSlopeInfo.slope} %<br>`;
-                                          popupContent += `(Fuente: ${usedMethod})<br>`; // Indicar la fuente del cálculo
+                                          // Se elimina la línea de la fuente: popupContent += `(Fuente: ${usedMethod})<br>`;
 
 
                                           // Calcular y añadir área en hectáreas
@@ -1076,7 +1079,7 @@
              const coveringMdtForSlope = await findCoveringMDT(selectedLayer.feature.geometry, mdtGeoTiffs); // Added await
 
              if (coveringMdtForSlope) {
-                  loadingStatusDiv.textContent = 'Calculando pendiente con MDT para orientación de pasadas...';
+                  loadingStatusDiv.textContent = 'Calculando altitud/pendiente con MDT para orientación de pasadas...';
                   const altitudeSlopeInfo = await calculateMdtAltitudeAndSlope(selectedLayer.feature.geometry, coveringMdtForSlope);
                   currentSlopePercentage = parseFloat(altitudeSlopeInfo.slope);
                   usedSlopeSource = "MDT";
@@ -1085,7 +1088,7 @@
 
              } else {
                   // Fallback a curvas de nivel si ningún MDT cubre la parcela para el cálculo de pendiente
-                  loadingStatusDiv.textContent = 'Calculando pendiente con Curvas de Nivel para orientación de pasadas...';
+                  loadingStatusDiv.textContent = 'Calculando altitud/pendiente con Curvas de Nivel para orientación de pasadas...';
                   const slopeInfoContour = calculateSlopeInfo(parcelGeometry, window.curvasNivelGeoJSONData);
                   currentSlopePercentage = parseFloat(slopeInfoContour.slope);
                   usedSlopeSource = "Curvas Nivel";
@@ -1610,7 +1613,7 @@
 
                 try {
                     originalParcelBbox = turf.bbox(parcelGeometry);
-                    originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalParcelBbox[1]]), {units: units});
+                    originalBboxWidthMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[2], originalBbox[1]]), {units: units});
                     originalBboxHeightMeters = turf.distance(turf.point([originalParcelBbox[0], originalParcelBbox[1]]), turf.point([originalParcelBbox[0], originalParcelBbox[3]]), {units: units});
                     originalParcelArea = turf.area(turf.feature(parcelGeometry));
                     originalBboxArea = originalBboxWidthMeters * originalBboxHeightMeters;
